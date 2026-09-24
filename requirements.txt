@@ -1,0 +1,14 @@
+# Hardware / I2C
+adafruit-circuitpython-bme280
+adafruit-circuitpython-tsl2591
+adafruit-circuitpython-mlx90640
+adafruit-blinka
+
+# Core
+numpy
+
+# Added when their modules are implemented:
+# opencv-python      # leaf_segmentation.py
+# scikit-learn        # train_correction_model.py / predict_correction.py
+# pandas               # build_training_set.py, analysis/*
+# matplotlib           # analysis/*
