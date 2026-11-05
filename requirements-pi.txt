@@ -1,0 +1,10 @@
+# Raspberry Pi hardware libraries (T0.3). Install on the Pi only.
+# picamera2 comes from apt (sudo apt install python3-picamera2), not pip.
+# FS3000 wind sensor library will be added when that sensor arrives.
+# Not pinned yet: pin after the first clean install on the Pi (Pi Python version still unchecked).
+adafruit-circuitpython-bme280
+adafruit-circuitpython-tsl2591
+adafruit-circuitpython-mlx90640
+adafruit-blinka
+numpy
+pyyaml

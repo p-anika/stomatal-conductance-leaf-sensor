@@ -1,0 +1,12 @@
+# Python build and tool caches
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# macOS
+.DS_Store
+
+# Raw images and thermal frames are too big for git; back them up separately (spec Section 6)
+data/raw/*/images/
+data/raw/*/thermal_frames.f32

@@ -1,14 +1,12 @@
-# Hardware / I2C
-adafruit-circuitpython-bme280
-adafruit-circuitpython-tsl2591
-adafruit-circuitpython-mlx90640
-adafruit-blinka
-
-# Core
-numpy
-
-# Added when their modules are implemented:
-# opencv-python      # leaf_segmentation.py
-# scikit-learn        # train_correction_model.py / predict_correction.py
-# pandas               # build_training_set.py, analysis/*
-# matplotlib           # analysis/*
+# Laptop and analysis packages (T0.3).
+# Pinned 2026-11-04 from a clean install on the laptop (Windows 11, Python 3.13.12).
+numpy==2.5.4
+scipy==1.18.1
+pandas==3.1.1
+pyyaml==6.0.3
+scikit-learn==1.9.1
+joblib==1.6.0
+opencv-python-headless==5.0.0.93
+matplotlib==3.11.2
+statsmodels==0.15.0
+pytest==9.2.0
