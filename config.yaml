@@ -56,7 +56,7 @@ acquisition:
   roi_source: manual                    # manual or rgb_mask
   min_roi_pixels: 6
 clock:
-  min_valid_date: 2026-10-01            # refuse to start if the system time is earlier (B14)
+  min_valid_date: "2026-10-01"           # refuse to start if the system time is earlier (B14)
   allow_unsynced: false
 windows:
   window_sec: 60

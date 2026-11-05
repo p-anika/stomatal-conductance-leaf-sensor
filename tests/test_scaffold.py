@@ -1,5 +1,4 @@
 """Phase 0 checks (T0.1 to T0.5)."""
-import datetime
 import subprocess
 from pathlib import Path
 
@@ -29,8 +28,8 @@ def test_config_spot_values_match_appendix_b(default_config: dict) -> None:
     assert default_config["convection"]["enhancement_factor"] == pytest.approx(1.0)
     # led_lamp must have no k: it has to be calibrated (T1.1)
     assert default_config["light_sources"]["led_lamp"]["k_wm2_per_lux"] is None
-    # YAML reads an unquoted date as a date object; the logger will rely on that
-    assert default_config["clock"]["min_valid_date"] == datetime.date(2026, 10, 1)
+    # Quoted in config.yaml so YAML gives text, not a date object (decision log 2026-11-04)
+    assert default_config["clock"]["min_valid_date"] == "2026-10-01"
     assert default_config["sensors"]["arducam"]["resolution"] == [2304, 1296]
 
 
