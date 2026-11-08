@@ -1,77 +1,176 @@
-"""
-Shared physical constants and helper functions for the leaf energy
-balance calculations used by physics_baseline.py and gs_calculator.py.
+"""Pure helper functions for the leaf and card energy balance (T1.2, Appendix A eqs. 1-10).
 
-Units:
-  - temperatures in degrees C (converted to Kelvin internally where needed)
-  - resistances in s/m
-  - fluxes in W/m^2
-  - vapor pressures in Pa
+Every constant comes from the cfg dict (config.yaml loaded by processing.config).
+Nothing here reads files. Units follow spec Section 6: temperatures in deg C (kelvin
+only inside radiation and buoyancy terms), pressure in hPa at the interface and Pa
+inside the math, resistances in s m-1, fluxes in W m-2, lengths in m, wind in m s-1.
+
+Deviation from the spec signatures (owner-approved, decision_log 2026-11-08):
+saturation_vapor_pressure_pa, psychrometric_constant_pa, molar_density_mol_m3 and
+net_radiation_wm2 take cfg as an explicit argument; lux_to_irradiance_wm2 takes an
+optional c_position (default 1.0).
 """
+from __future__ import annotations
 
 import math
+from typing import Any
 
-# --- Physical constants ---
-STEFAN_BOLTZMANN = 5.670374419e-8    # W / m^2 / K^4
-AIR_DENSITY = 1.204                   # kg / m^3, ~20C at sea level (documented approx)
-SPECIFIC_HEAT_AIR = 1010.0            # J / kg / K
-PSYCHROMETRIC_CONSTANT = 66.5         # Pa / K, approx at sea level (~101.3 kPa)
-
-# Ratio of boundary-layer resistance to water vapor vs. to heat. Water
-# vapor diffuses slightly differently than heat is transferred across the
-# same boundary layer; this Lewis-number-based correction is a standard,
-# documented approximation in leaf energy balance work (see e.g. Jones,
-# "Plants and Microclimate"). It is treated as fixed -- the ML model
-# corrects r_bH itself, not this ratio.
-R_BW_TO_R_BH_RATIO = 0.93
-
-# Approximate conversion from illuminance (lux) to shortwave irradiance
-# (W/m^2) under daylight conditions. This stands in for a calibrated
-# pyranometer -- a documented tradeoff (see project limitations).
-LUX_TO_WM2 = 1.0 / 126.0
+REGIMES = ("forced", "mixed", "free")
 
 
-def c_to_k(temp_c: float) -> float:
-    """Celsius to Kelvin."""
-    return temp_c + 273.15
+def c_to_k(temp_c: float, cfg: dict[str, Any]) -> float:
+    """T_K = T_C + kelvin_offset."""
+    return temp_c + cfg["physics"]["kelvin_offset"]
 
 
-def saturation_vapor_pressure_pa(temp_c: float) -> float:
+def rho_cp_j_m3_k(cfg: dict[str, Any]) -> float:
+    """Volumetric heat capacity of air, rho x cp [kg m-3 x J kg-1 K-1 = J m-3 K-1] (eq. 3)."""
+    return cfg["physics"]["air_density_kg_m3"] * cfg["physics"]["specific_heat_air_j_kg_k"]
+
+
+def saturation_vapor_pressure_pa(temp_c: float, cfg: dict[str, Any]) -> float:
+    """Tetens (eq. 5): e_s = a x exp(b T / (T + c)), T in deg C, e_s in Pa."""
+    p = cfg["physics"]
+    denom = temp_c + p["tetens_c_c"]
+    if denom <= 0:
+        raise ValueError(f"temperature {temp_c} C is outside the Tetens formula's range")
+    return p["tetens_a_pa"] * math.exp(p["tetens_b"] * temp_c / denom)
+
+
+def psychrometric_constant_pa(pressure_hpa: float, cfg: dict[str, Any]) -> float:
+    """gamma [Pa K-1] = 0.0665 [Pa K-1 hPa-1] x P [hPa] (eq. 6, FAO-56)."""
+    if not pressure_hpa > 0:
+        raise ValueError(f"pressure must be positive, got {pressure_hpa} hPa")
+    return cfg["physics"]["gamma_pa_per_k_per_hpa"] * pressure_hpa
+
+
+def molar_density_mol_m3(pressure_hpa: float, air_temp_c: float, cfg: dict[str, Any]) -> float:
+    """Ideal gas (eq. 8): n/V = P / (R T), P in Pa (= 100 x hPa), T in K, result mol m-3."""
+    if not pressure_hpa > 0:
+        raise ValueError(f"pressure must be positive, got {pressure_hpa} hPa")
+    pressure_pa = pressure_hpa * 100.0  # unit conversion hPa -> Pa
+    return pressure_pa / (cfg["physics"]["gas_constant_j_mol_k"] * c_to_k(air_temp_c, cfg))
+
+
+def lux_to_irradiance_wm2(lux: float, k: float, c_position: float = 1.0) -> float:
+    """Shortwave at the surface (eq. 1): E_s [W m-2] = c_position x k [W m-2 lux-1] x lux.
+
+    c_position is the card or leaf position factor (A16); use
+    processing.config.get_position_factor, which flags c_position_default when unmeasured.
     """
-    Saturation vapor pressure (Pa) via the Tetens formula. Accurate to
-    within ~0.1% over typical leaf/air temperature ranges (0-50C).
+    return c_position * k * lux
+
+
+def net_radiation_wm2(irradiance_wm2: float, a_s: float, surface_temp_c: float,
+                      surroundings_temp_c: float, emissivity: float, faces: int,
+                      include_longwave: bool, cfg: dict[str, Any]) -> float:
+    """Net radiation per one-sided area (eq. 2), W m-2:
+
+        Rn = a_s x E_s + faces x emissivity x sigma x (T_sur^4 - T_s^4),  T in K.
+
+    The longwave term is left out when include_longwave is False.
     """
-    return 610.78 * math.exp((17.27 * temp_c) / (temp_c + 237.3))
+    if faces not in (1, 2):
+        raise ValueError(f"faces must be 1 or 2, got {faces}")
+    rn = a_s * irradiance_wm2
+    if include_longwave:
+        t_sur_k = c_to_k(surroundings_temp_c, cfg)
+        t_s_k = c_to_k(surface_temp_c, cfg)
+        rn += faces * emissivity * cfg["physics"]["stefan_boltzmann"] * (t_sur_k ** 4 - t_s_k ** 4)
+    return rn
 
 
-def net_radiation_wm2(lux: float, air_temp_c: float, surface_temp_c: float,
-                       absorptivity: float = 0.5, emissivity: float = 0.95) -> float:
+def _sidedness(cfg: dict[str, Any]) -> int:
+    """s is always physics.faces; config must say so (spec T1.2)."""
+    if cfg["convection"]["sidedness_factor"] != "from_faces":
+        raise ValueError("convection.sidedness_factor must be 'from_faces'; "
+                         "s is read from physics.faces and never set separately")
+    s = cfg["physics"]["faces"]
+    if s not in (1, 2):
+        raise ValueError(f"physics.faces must be 1 or 2, got {s}")
+    return s
+
+
+def prandtl_number(cfg: dict[str, Any]) -> float:
+    """Pr = nu / D_H (dimensionless)."""
+    c = cfg["convection"]
+    return c["kinematic_viscosity_m2_s"] / c["thermal_diffusivity_m2_s"]
+
+
+def equivalent_coefficient_c(cfg: dict[str, Any]) -> float:
+    """C in the forced-only shortcut r_bH = C sqrt(d/U), units s^0.5 m-1 (eq. 10):
+
+        C = sqrt(nu) / (s x b x a_forced x D_H x Pr^(1/3))
     """
-    Estimate net radiation absorbed by a surface (leaf or reference
-    card), in W/m^2.
+    c = cfg["convection"]
+    s = _sidedness(cfg)
+    return math.sqrt(c["kinematic_viscosity_m2_s"]) / (
+        s * c["enhancement_factor"] * c["forced_nu_coeff"]
+        * c["thermal_diffusivity_m2_s"] * prandtl_number(cfg) ** (1.0 / 3.0))
 
-        Rn = absorbed shortwave + net longwave
 
-    Shortwave is estimated from the TSL2591 lux reading via the
-    documented lux->W/m2 approximation above. Longwave exchange assumes
-    the sky/surroundings radiate as a blackbody at air temperature --
-    itself a simplification, since real sky temperature typically runs a
-    few degrees below air temperature under clear skies. Flagged here as
-    a known source of systematic error, not hidden.
+def flat_plate_conductances(d_m: float, wind_ms: float, delta_t_c: float, air_temp_c: float,
+                            cfg: dict[str, Any]) -> tuple[float, float]:
+    """Forced and free heat conductances (m s-1) of a flat plate, both sides counted by s (eq. 10).
 
-    absorptivity: fraction of incoming shortwave absorbed by this
-        surface. ~0.5 is typical for a green leaf; use the same value
-        for the reference card, since it is deliberately coated to
-        approximate the leaf's shortwave absorptivity (see project
-        description) -- this is what makes the two surfaces comparable.
-    emissivity: longwave emissivity, ~0.95-0.98 for both leaf tissue and
-        a matte-black-coated card.
+        Re = U d / nu;   Gr = g beta d^3 dT / nu^2,  beta = 1 / T_air[K]
+        Nu_forced = b x 0.66 x Pr^(1/3) x Re^(1/2);   Nu_free = 0.54 x Pr^(1/4) x Gr^(1/4)
+        g_x = s x D_H x Nu_x / d
+
+    U below wind_noise_floor_ms is set to 0. dT inside Gr is max(|delta_t_c|,
+    min_grashof_delta_t_c) so the free term never vanishes.
     """
-    shortwave_in = lux * LUX_TO_WM2
-    absorbed_shortwave = absorptivity * shortwave_in
+    if not (d_m > 0 and math.isfinite(d_m)):
+        raise ValueError(f"d_m must be a positive length in metres, got {d_m}")
+    if not (math.isfinite(wind_ms) and wind_ms >= 0):
+        raise ValueError(f"wind_ms must be a finite non-negative speed, got {wind_ms} "
+                         "(missing wind is reason no_wind, handled by the caller)")
+    if not math.isfinite(delta_t_c):
+        raise ValueError(f"delta_t_c must be finite, got {delta_t_c}")
+    c = cfg["convection"]
+    s = _sidedness(cfg)
+    nu = c["kinematic_viscosity_m2_s"]
+    d_h = c["thermal_diffusivity_m2_s"]
+    pr = prandtl_number(cfg)
 
-    t_air_k = c_to_k(air_temp_c)
-    t_surface_k = c_to_k(surface_temp_c)
-    net_longwave = emissivity * STEFAN_BOLTZMANN * (t_air_k**4 - t_surface_k**4)
+    u = wind_ms if wind_ms >= c["wind_noise_floor_ms"] else 0.0
+    re = u * d_m / nu
+    nu_forced = c["enhancement_factor"] * c["forced_nu_coeff"] * pr ** (1.0 / 3.0) * math.sqrt(re)
 
-    return absorbed_shortwave + net_longwave
+    dt_gr = max(abs(delta_t_c), c["min_grashof_delta_t_c"])
+    beta = 1.0 / c_to_k(air_temp_c, cfg)
+    gr = cfg["physics"]["gravity_m_s2"] * beta * d_m ** 3 * dt_gr / nu ** 2
+    nu_free = c["free_nu_coeff"] * pr ** 0.25 * gr ** 0.25
+
+    return s * d_h * nu_forced / d_m, s * d_h * nu_free / d_m
+
+
+def flat_plate_rbh(d_m: float, wind_ms: float, delta_t_c: float, air_temp_c: float,
+                   cfg: dict[str, Any]) -> tuple[float, str]:
+    """Flat-plate heat boundary-layer resistance and regime (eq. 10).
+
+        r_bH [s m-1] = 1 / (g_forced + g_free)
+
+    Regime: "forced" if g_free/g_forced < mixed_convection_ratio, "free" if
+    g_forced/g_free < mixed_convection_ratio (including U = 0), else "mixed".
+    Use convection_flags(regime) for the baseline_unreliable flag.
+    """
+    if cfg["convection"]["combination"] != "sum":
+        raise ValueError("convection.combination must be 'sum' (Nu_forced + Nu_free, Appendix A eq. 10); "
+                         f"got '{cfg['convection']['combination']}'")
+    g_forced, g_free = flat_plate_conductances(d_m, wind_ms, delta_t_c, air_temp_c, cfg)
+    ratio = cfg["convection"]["mixed_convection_ratio"]
+    if g_free < ratio * g_forced:
+        regime = "forced"
+    elif g_forced < ratio * g_free:
+        regime = "free"
+    else:
+        regime = "mixed"
+    return 1.0 / (g_forced + g_free), regime
+
+
+def convection_flags(regime: str) -> tuple[str, ...]:
+    """Flag baseline_unreliable for mixed or free convection (spec Section 6 flags)."""
+    if regime not in REGIMES:
+        raise ValueError(f"unknown regime '{regime}'")
+    return () if regime == "forced" else ("baseline_unreliable",)

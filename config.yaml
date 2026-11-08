@@ -14,6 +14,13 @@ physics:
   min_abs_rn_wm2: 1.0
   min_card_absorbed_sw_wm2: 40.0        # placeholder gate for card readings; set from calibrated noise after T7.5 (T1.3)
   allow_uncalibrated_k: false           # window and sunlight only; never honored for LED (T1.1)
+  # Added in T1.2 (2026-11-08, see decision_log): constants that were literals in code.
+  gas_constant_j_mol_k: 8.314           # Appendix A eq. 8
+  gravity_m_s2: 9.81                    # Grashof number (A10)
+  kelvin_offset: 273.15                 # degrees C to K
+  tetens_a_pa: 610.78                   # Appendix A eq. 5
+  tetens_b: 17.27
+  tetens_c_c: 237.3
 convection:                             # flat-plate baseline (A10, A11); verify every value in Campbell & Norman
   forced_nu_coeff: 0.66                 # laminar plate
   enhancement_factor: 1.0               # UNVERIFIED: 1.0 until checked; sources give 1.4 to 1.5; C is proportional to 1/b
@@ -23,6 +30,10 @@ convection:                             # flat-plate baseline (A10, A11); verify
   card_transfer_max_change: 0.15        # flag card_direct when r_b changes more than this from card to leaf temperature difference (A17)
   mixed_convection_ratio: 0.3           # free/forced conductance ratio that marks mixed convection
   wind_noise_floor_ms: 0.1              # readings below this count as zero forced flow; set by wind_check.py
+  # Added in T1.2 (2026-11-08, see decision_log). All UNVERIFIED (docs/sources.md).
+  kinematic_viscosity_m2_s: 1.51e-5     # air at 20 C, recalled from Campbell & Norman Table A.3; UNVERIFIED
+  thermal_diffusivity_m2_s: 2.15e-5     # air at 20 C, recalled from Campbell & Norman Table A.3; UNVERIFIED
+  min_grashof_delta_t_c: 0.5            # floor on |T_s - T_a| used only inside the Grashof number; placeholder, UNVERIFIED
 methods:
   primary: card_direct                  # basis of all headline results
   secondary: ml_corrected               # reported only if it passes validation

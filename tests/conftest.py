@@ -13,7 +13,6 @@ from typing import Any, Dict
 
 import numpy as np
 import pytest
-import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -46,10 +45,9 @@ def repo_root() -> Path:
 
 @pytest.fixture
 def default_config() -> Dict[str, Any]:
-    # Plain yaml.safe_load for now. T1.1 adds processing/config.load_config, which
-    # should replace this so every test goes through the real loader.
-    with open(REPO_ROOT / "config.yaml", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    # Goes through the real loader (T1.1) so every test reads config the same way.
+    from processing.config import load_config
+    return load_config(REPO_ROOT / "config.yaml")
 
 
 @pytest.fixture
