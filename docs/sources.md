@@ -20,3 +20,4 @@ Every citation or coefficient Claude Code uses. Status stays UNVERIFIED until th
 | explainer: R_d, M_air, R_v, λ(0 °C), D_v | 287.05 J kg⁻¹ K⁻¹, 0.028965 kg mol⁻¹, 461.5 J kg⁻¹ K⁻¹, 2.501 MJ kg⁻¹, 24.0–24.2 mm² s⁻¹ | Recalled by Claude, used only in explainer derivations, not in code | UNVERIFIED | docs/explainers/energy_balance_utils.md |
 | explainer: diffusivity temperature scaling | ν, D_H ∝ T^1.75 | Recalled by Claude, used only to size Limitation 4 | UNVERIFIED | docs/explainers/energy_balance_utils.md |
 | check: spec C values 156/208/104/313 | code gives 154.04/205.38/102.69/308.08 s^0.5 m⁻¹ (within 3%) | Spec T1.7 item 6 | consistent with spec (inputs UNVERIFIED) | tests/test_energy_balance.py |
+| config: card.a_s_card_placeholder | 0.95 (matte black card, shortwave absorptivity) | Appendix B comment "matte black about 0.95"; no source given | UNVERIFIED | config.yaml card; physics_baseline.card_absorptivity (only when allow_default_a_s_card is true) |

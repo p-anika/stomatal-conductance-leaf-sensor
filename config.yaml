@@ -51,6 +51,10 @@ light_sources:
 card:
   a_s_card: null                        # measure or justify; matte black about 0.95
   emissivity: 0.95
+  # Added in T1.3 (2026-11-08, see decision_log): a missing a_s_card raises CalibrationMissing
+  # unless allow_default_a_s_card is true; then the placeholder is used and flagged a_s_default.
+  allow_default_a_s_card: false
+  a_s_card_placeholder: 0.95            # matte black, UNVERIFIED (docs/sources.md)
 enumerations:
   genotype: [Houjaku_Kuwazu, Williams_82]
   water_treatment: [well_watered, drought_stressed]
