@@ -4,10 +4,11 @@ Owner is a beginner programmer and a high-school researcher. Keep chat replies s
 Put explanations in the docs files named below, in plain language.
 
 ## Environment
-- Target Python: lowest version on laptop and Raspberry Pi. Windows laptop Python version is 3.13.12, but Raspberry Pi's python version has not been checked yet. Write syntax that runs on it.
+- Target Python: lowest version on laptop and Raspberry Pi. Windows laptop Python version is 3.13.12, but Raspberry Pi's python version has not been checked yet. Write syntax that runs on it. (not following web claude's guess of python 3.9 for pi right now)
 - Code is written and tested on the laptop. Only files the spec marks [PI] may import hardware libraries
   (smbus2, adafruit_*, picamera2, RPi.*). Everything else must import and run on a laptop.
 - You cannot run Pi code or touch sensors. Never claim a hardware step works; say it is untested until the owner pastes output.
+- Run everything with .venv\Scripts\python (for example .venv\Scripts\python -m pytest -q --tb=short).
 
 ## Source of truth
 - The plan is in docs/spec/. Read ONLY the files and task IDs I name, plus 02_layout_conventions.md and 08_appendix_A_equations.md when physics is involved.
