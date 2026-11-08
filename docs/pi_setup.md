@@ -6,7 +6,7 @@
 ```
 python3 --version
 ```
-The code is written for the lower of the laptop (3.13.12) and Pi versions. For now it assumes 3.11 or newer. Tell Claude the result so it can be recorded in docs/decision_log.md.
+Checked 2026-11-07: the Pi runs Python 3.13.5 on Debian 13 (trixie), aarch64. The laptop runs 3.13.12. The code targets Python 3.13 on both (see docs/decision_log.md). If `python3 --version` ever shows something other than 3.13, tell Claude before running the code.
 
 ## 2. Install the hardware libraries
 From the repository folder on the Pi:

@@ -13,6 +13,9 @@ A contact-free way to estimate how open a soybean leaf's stomata are (stomatal c
 - `docs/`: equations, assumptions, protocol, Pi setup, design notes, decision log.
 - `config.yaml`: every constant and setting.
 
+## Python version
+The code targets Python 3.13. The laptop runs 3.13.12; the Raspberry Pi runs 3.13.5 on Debian 13 (trixie), aarch64.
+
 ## Setup on the laptop
 Run from the repository folder:
 ```

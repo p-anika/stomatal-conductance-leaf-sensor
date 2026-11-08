@@ -4,7 +4,7 @@ Owner is a beginner programmer and a high-school researcher. Keep chat replies s
 Put explanations in the docs files named below, in plain language.
 
 ## Environment
-- Target Python: lowest version on laptop and Raspberry Pi. Windows laptop Python version is 3.13.12, but Raspberry Pi's python version has not been checked yet. Write syntax that runs on it. (not following web claude's guess of python 3.9 for pi right now)
+- Target Python: 3.13 (Pi: 3.13.5 on Debian 13 trixie, aarch64; laptop: 3.13.12). Write syntax and use packages that run on 3.13. Run everything with .venv\Scripts\python.
 - Code is written and tested on the laptop. Only files the spec marks [PI] may import hardware libraries
   (smbus2, adafruit_*, picamera2, RPi.*). Everything else must import and run on a laptop.
 - You cannot run Pi code or touch sensors. Never claim a hardware step works; say it is untested until the owner pastes output.
