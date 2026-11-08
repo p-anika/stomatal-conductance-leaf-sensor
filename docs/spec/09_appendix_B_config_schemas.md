@@ -90,6 +90,20 @@ ml:
   features: [d_min_mm, d_eq_mm, aspect_ratio, eccentricity, solidity, circularity, edge_density, incidence_angle_deg, wind_ms]
 ```
 
+**calibration.json schema (decided in Session 3).** One JSON object; every key is optional. It mirrors the section and key names of config.yaml, and a non-null calibration value overrides the config value with the same section and key. Only calibration.json counts as calibrated.
+
+```json
+{
+  "light_sources": {
+    "<name>": { "k_wm2_per_lux": 0.0, "a_s_leaf": 0.0 }
+  },
+  "spatial": { "irradiance_factor_leaf": 0.0, "irradiance_factor_card": 0.0 },
+  "card": { "a_s_card": 0.0, "emissivity": 0.0 }
+}
+```
+
+Rules: k\_wm2\_per\_lux is a number above 0 and a\_s\_leaf is a number in (0, 1\]; the spatial factors are above 0. For led\_lamp, k stays null in config.yaml with no default and no fallback anywhere. The sunlight value in config.yaml is a reference value, not a calibration, so uncalibrated sunlight also needs allow\_uncalibrated\_k and carries the k\_uncalibrated flag. Values quoted in chat (for example 0.004) are examples, never defaults. Temperature offsets and ROIs get keys when their tasks (T7.4, T7.5) are written.
+
 **data/raw/\<session\_id>/sensor\_log.csv columns:** session\_id, timestamp\_iso, timestamp\_corrected\_iso, monotonic\_s, air\_temp\_c, humidity\_pct, pressure\_hpa, lux, tsl\_visible, tsl\_infrared, tsl\_full\_spectrum, tsl\_gain, tsl\_integration\_ms, wind\_ms, wind\_raw, wind\_status, wind\_source, thermal\_frame\_idx, thermal\_min\_c, thermal\_max\_c, thermal\_mean\_c, leaf\_temp\_c, leaf\_temp\_median\_c, leaf\_temp\_std\_c, leaf\_n\_px, card\_temp\_c, card\_temp\_std\_c, card\_n\_px, wet\_ref\_temp\_c, wet\_ref\_n\_px, image\_file, qc\_flags.
 
 **events.csv columns:** timestamp\_iso, label, note.

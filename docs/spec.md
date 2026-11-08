@@ -228,7 +228,7 @@ stomatal-conductance-leaf-sensor/
 - **Config over constants.** Physical constants and settings come from processing/config.py. No numeric literals for physical constants inside functions.
 - **Result objects.** Frozen dataclasses with valid, reason and flags. Bad data returns an invalid result; it never raises. Exceptions are for programmer errors only (missing config key, malformed file).
 - **Reason codes (fixed vocabulary):** ok, missing\_input, no\_wind, rn\_near\_zero, low\_card\_signal, suspect\_card\_rbh, roi\_too\_small, not\_steady\_state, sensor\_overflow, qc\_spike, segmentation\_failed, no\_photo\_in\_window, clock\_unsynced. Censoring is not a failure: every g\_s result also carries censor = none, below\_detection or above\_range, and censored results stay in every table.
-- **Flags (non-fatal):** k\_uncalibrated, a\_s\_default, low\_light, marginal, baseline\_unreliable (mixed or free convection), card\_transfer\_unreliable (card\_direct under mixed or free convection, A17), regime\_unknown (no wind measurement).
+- **Flags (non-fatal):** k\_uncalibrated, a\_s\_default, c\_position\_default (a leaf or card irradiance factor is not yet measured, so 1.0 was used), low\_light, marginal, baseline\_unreliable (mixed or free convection), card\_transfer\_unreliable (card\_direct under mixed or free convection, A17), regime\_unknown (no wind measurement).
 - **Raw data is append-only.** Processing writes only to data/processed/ and data/models/.
 - **Logging** with the logging module (console plus data/raw/\<session\_id>/logger.log), not print.
 - **Style.** Type hints; each docstring states the equation and units; syntax compatible with the target Python version recorded in CLAUDE.md (the lower of the laptop and Raspberry Pi versions).
@@ -589,6 +589,20 @@ ml:
   n_bootstrap: 200
   features: [d_min_mm, d_eq_mm, aspect_ratio, eccentricity, solidity, circularity, edge_density, incidence_angle_deg, wind_ms]
 ```
+
+**calibration.json schema (decided in Session 3).** One JSON object; every key is optional. It mirrors the section and key names of config.yaml, and a non-null calibration value overrides the config value with the same section and key. Only calibration.json counts as calibrated.
+
+```json
+{
+  "light_sources": {
+    "<name>": { "k_wm2_per_lux": 0.0, "a_s_leaf": 0.0 }
+  },
+  "spatial": { "irradiance_factor_leaf": 0.0, "irradiance_factor_card": 0.0 },
+  "card": { "a_s_card": 0.0, "emissivity": 0.0 }
+}
+```
+
+Rules: k\_wm2\_per\_lux is a number above 0 and a\_s\_leaf is a number in (0, 1\]; the spatial factors are above 0. For led\_lamp, k stays null in config.yaml with no default and no fallback anywhere. The sunlight value in config.yaml is a reference value, not a calibration, so uncalibrated sunlight also needs allow\_uncalibrated\_k and carries the k\_uncalibrated flag. Values quoted in chat (for example 0.004) are examples, never defaults. Temperature offsets and ROIs get keys when their tasks (T7.4, T7.5) are written.
 
 **data/raw/\<session\_id>/sensor\_log.csv columns:** session\_id, timestamp\_iso, timestamp\_corrected\_iso, monotonic\_s, air\_temp\_c, humidity\_pct, pressure\_hpa, lux, tsl\_visible, tsl\_infrared, tsl\_full\_spectrum, tsl\_gain, tsl\_integration\_ms, wind\_ms, wind\_raw, wind\_status, wind\_source, thermal\_frame\_idx, thermal\_min\_c, thermal\_max\_c, thermal\_mean\_c, leaf\_temp\_c, leaf\_temp\_median\_c, leaf\_temp\_std\_c, leaf\_n\_px, card\_temp\_c, card\_temp\_std\_c, card\_n\_px, wet\_ref\_temp\_c, wet\_ref\_n\_px, image\_file, qc\_flags.
 
