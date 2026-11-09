@@ -12,7 +12,7 @@ Put explanations in the docs files named below, in plain language.
 
 ## Source of truth
 - The plan is in docs/spec/. Read ONLY the files and task IDs I name, plus 02_layout_conventions.md and 08_appendix_A_equations.md when physics is involved.
-- Do only the named task. Never edit anything in docs/spec/.
+- Do only the named task. Never edit docs/spec/ during a /task. Spec edits happen only when I run /spec-update.
 - If the spec looks wrong, unphysical or contradicts itself, STOP and tell me before coding.
 - Never change a constant, config value or equation silently. Log every change in docs/decision_log.md.
 
