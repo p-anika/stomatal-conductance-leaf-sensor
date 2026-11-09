@@ -281,8 +281,8 @@ solve_stomatal_conductance(reading, cfg, cal) -> ConductanceResult
 
 ### Phase 2: Metadata \[READY\]
 
-- **T2.1 session\_metadata.py (P0).** Extend the dataclass with: session\_id, timestamp\_start (ISO with timezone), plant\_id, genotype, water\_treatment, reproductive\_stage, block, position, leaf\_position, light\_source, lamp\_distance\_mm, window\_blocked, acclimation\_minutes, fan\_state, working\_distance\_mm, incidence\_angle\_deg, card\_angle\_deg, lamp\_angle\_deg, lamp\_to\_card\_mm, background (neutral\_matte or other), card\_id, dry\_reference\_type (none, card, vaseline\_leaf), wet\_reference\_present, operator, porometer\_gs\_mol (optional), notes. Allowed values for genotype (Houjaku\_Kuwazu, Williams\_82), water\_treatment (well\_watered, drought\_stressed), light\_source (window, led\_lamp, sunlight), fan\_state (off, low, high) and reproductive\_stage live in config; reject anything else with a clear message. Support command-line flags (--plant-id, --genotype, ...) and fall back to prompts for missing values. If data/raw/session\_metadata.csv has the old header, back it up as .bak and rewrite it with the new columns, leaving old rows’ new fields blank. Also write a session.json copy inside the session folder. Done when tests cover rejection of bad values and old-file migration.
-- **T2.2 Reference-card manifest (P0).** data/reference\_cards.csv with card\_id, shape\_group, source (designed, traced\_leaf), material, thickness\_mm, coating, a\_s\_card, emissivity, area\_mm2, photo\_path, notes; loader in data\_io.py. Done when the loader validates required columns.
+- **T2.1 session\_metadata.py (P0).** Extend the dataclass with: session\_id, timestamp\_start (ISO with timezone), plant\_id, genotype, water\_treatment, reproductive\_stage, block, position, leaf\_position, light\_source, lamp\_distance\_mm, window\_blocked, acclimation\_minutes, fan\_state, working\_distance\_mm, incidence\_angle\_deg, card\_angle\_deg, lamp\_angle\_deg, lamp\_to\_card\_mm, background (neutral\_matte or other), card\_id, dry\_reference\_type (none, card, vaseline\_leaf), wet\_reference\_present, operator, porometer\_gs\_mol (optional), notes. Allowed values for genotype (Houjaku\_Kuwazu, Williams\_82), water\_treatment (well\_watered, drought\_stressed), light\_source (window, led\_lamp, sunlight), fan\_state (off, low, high) and reproductive\_stage live in config; reject anything else with a clear message. Support command-line flags (--plant-id, --genotype, ...) and fall back to prompts for missing values. Validation: block is a whole number ≥ 1; position and leaf\_position are normalised to lowercase with underscores; lamp\_distance\_mm, lamp\_angle\_deg and lamp\_to\_card\_mm are required only for led\_lamp (blank otherwise); angles are 0 to 90°; plant\_id contains only letters, digits, - and \_; timestamps carry a UTC offset. When dry\_reference\_type is card and the card\_id is not in data/reference\_cards.csv, warn (do not reject). If data/raw/session\_metadata.csv exists with an old or unknown header, refuse to write and ask the user to move it aside; never rewrite raw data. Also write a session.json copy inside the session folder. Done when tests cover rejection of bad values and refusal of an old-format file.
+- **T2.2 Reference-card manifest (P0).** data/reference\_cards.csv with the columns of Appendix B. These 11 are required: card\_id, shape\_group, source (designed, traced\_leaf), material, thickness\_mm, coating, a\_s\_card, emissivity, area\_mm2, photo\_path, notes; d\_min\_mm, d\_eq\_mm, aspect\_ratio, eccentricity, solidity, circularity, edge\_density and geometry\_source are optional until measured. Numbers may be blank until measured. Loader in data\_io.py. Done when the loader validates required columns.
 - **T2.3 Tests (P0).** tests/test\_session\_metadata.py.
 
 ### Phase 3: Thermal and image processing \[READY with sample images; final tuning BLOCKED-CAM\]
@@ -550,9 +550,10 @@ enumerations:
   genotype: [Houjaku_Kuwazu, Williams_82]
   water_treatment: [well_watered, drought_stressed]
   light_source: [window, led_lamp, sunlight]
-  fan_state: [off, low, high]
+  fan_state: ["off", low, high]         # quoted: bare off, no and yes become booleans in YAML
   dry_reference_type: [none, card, vaseline_leaf]
-  reproductive_stage: [V, R1, R2, R3, R4, R5, R6, R7]
+  reproductive_stage: [VE, VC, V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, R1, R2, R3, R4, R5, R6, R7, R8]
+  background: [neutral_matte, other]
 acquisition:
   log_interval_sec: 5
   thermal_refresh_hz: 2

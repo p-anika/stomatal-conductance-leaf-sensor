@@ -46,9 +46,10 @@ enumerations:
   genotype: [Houjaku_Kuwazu, Williams_82]
   water_treatment: [well_watered, drought_stressed]
   light_source: [window, led_lamp, sunlight]
-  fan_state: [off, low, high]
+  fan_state: ["off", low, high]         # quoted: bare off, no and yes become booleans in YAML
   dry_reference_type: [none, card, vaseline_leaf]
-  reproductive_stage: [V, R1, R2, R3, R4, R5, R6, R7]
+  reproductive_stage: [VE, VC, V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, R1, R2, R3, R4, R5, R6, R7, R8]
+  background: [neutral_matte, other]
 acquisition:
   log_interval_sec: 5
   thermal_refresh_hz: 2
