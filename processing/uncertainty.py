@@ -9,18 +9,24 @@ Error model per draw (n draws, numpy default_rng(seed)):
 Each draw is re-solved with eqs. 1-8 (solve_core, checked against gs_calculator.solve_gs).
 Pressure and surroundings temperature are not perturbed.
 
-Draw outcomes and the value used for percentiles (mol m-2 s-1):
-    VPD <= 0      -> excluded from percentiles, counted, and counts as NOT resolved
+Draw outcomes and the value used for percentiles (mol m-2 s-1). EVERY draw is used:
     lambdaE <= 0  -> 0 (closed stomata)
-    r_s <= 0      -> g_s_cap_mol (top of measurable range)
+    r_s <= 0      -> g_s_cap_mol (top of measurable range). This includes VPD <= 0 with
+                     lambdaE > 0, where eq. 8 gives r_s < 0 (spec, Session 8 review).
     otherwise     -> min(g_s, g_s_cap_mol)
 An upper bound equal to the cap means "not bounded above" (hi_at_cap = True).
+The fraction of draws with VPD <= 0 is reported as a diagnostic only.
 
-Resolved (a label, never a filter): fraction of ALL draws that are OK >= dl_min_resolved_fraction
-and (p97.5 - p2.5) / median < max_relative_width and p97.5 < g_s_cap_mol.
+Resolved (a label, never a filter), all three must hold:
+    (1) fraction of all draws that are OK (lambdaE > 0 and r_s > 0, hence VPD > 0)
+        >= dl_min_resolved_fraction
+    (2) (p97.5 - p2.5) / median strictly below max_relative_width
+    (3) p97.5 strictly below g_s_cap_mol
 Detection limit g_s_dl: on a log grid of true g_s (dl_grid_min_mol to g_s_cap_mol), find the
 leaf temperature each would give under this window's conditions, apply the same draws, and
-return the smallest true g_s that is resolved. None if no grid value is resolved.
+return the smallest true g_s that is resolved. Grid points where no leaf temperature is found
+are counted (dl_grid_no_root), so g_s_dl = None from "nothing resolved" (count 0) can be told
+apart from "the root search failed" (count > 0).
 """
 from __future__ import annotations
 
@@ -53,7 +59,7 @@ from processing.physics_baseline import (
 )
 
 # Per-draw status codes.
-OK, BELOW, ABOVE, VPD = 0, 1, 2, 3
+OK, BELOW, ABOVE = 0, 1, 2
 
 # Percentiles: 2.5 / 50 / 97.5 for the 95 % interval; 15.87 / 84.13 are +-1 sigma of a normal.
 _P_LO, _P_MID, _P_HI = 2.5, 50.0, 97.5
@@ -126,6 +132,7 @@ def solve_core(t_s: np.ndarray, t_a: np.ndarray, t_sur: float | None, rh: np.nda
     """Eqs. 1-8 on arrays, same order of checks as gs_calculator.solve_gs.
 
     Returns rn, latent [W m-2], vpd [Pa], g_mol [mol m-2 s-1, nan unless status OK], status.
+    VPD <= 0 is not a separate status: with lambdaE > 0 it gives r_s < 0 (ABOVE).
     """
     phys = cfg["physics"]
     lw = bool(phys["include_longwave"])
@@ -138,7 +145,7 @@ def solve_core(t_s: np.ndarray, t_a: np.ndarray, t_sur: float | None, rh: np.nda
     with np.errstate(divide="ignore", invalid="ignore"):
         r_s = rho_cp * vpd / (gamma * latent) - phys["rbw_to_rbh_ratio"] * r_bh
         g_mol = molar_density_mol_m3(p_hpa, t_a, cfg) / r_s
-    status = np.select([vpd <= 0, latent <= 0, r_s <= 0], [VPD, BELOW, ABOVE], OK)
+    status = np.select([latent <= 0, r_s <= 0], [BELOW, ABOVE], OK)
     g_mol = np.where(status == OK, g_mol, np.nan)
     return {"rn": rn, "latent": latent, "vpd": vpd, "g_mol": g_mol, "status": status}
 
@@ -153,6 +160,8 @@ class GsDraws:
     rh: np.ndarray
     e_s: np.ndarray
     r_bh: np.ndarray
+    latent: np.ndarray
+    vpd: np.ndarray
     g_mol: np.ndarray
     status: np.ndarray
 
@@ -175,7 +184,8 @@ def _draw_at(t_leaf_c: float, reading: LeafReading, e_s_wm2: float, a_s: float,
     r_bh = reading.r_bh * np.exp(s.rb_fraction * z[4])
     out = solve_core(t_leaf, t_air, reading.surroundings_temp_c, rh, reading.pressure_hpa,
                      e_s, a_s, r_bh, cfg)
-    return GsDraws(t_leaf, t_air, rh, e_s, r_bh, out["g_mol"], out["status"])
+    return GsDraws(t_leaf, t_air, rh, e_s, r_bh, out["latent"], out["vpd"], out["g_mol"],
+                   out["status"])
 
 
 def gs_draws(reading: LeafReading, cfg: dict[str, Any], cal: dict[str, Any],
@@ -192,7 +202,6 @@ class _Summary:
     lo: float | None
     median: float | None
     hi: float | None
-    n_used: int
     frac_ok: float
     rel_width: float
     resolved: bool
@@ -203,17 +212,15 @@ def _summarise(d: GsDraws, cfg: dict[str, Any]) -> _Summary:
     cap = float(unc["g_s_cap_mol"])
     st = d.status
     frac_ok = float(np.mean(st == OK))
-    used = st != VPD
-    if not used.any():
-        return _Summary(None, None, None, 0, frac_ok, math.inf, False)
+    # No draw is excluded: dropping any outcome would truncate the interval.
     values = np.where(st == BELOW, 0.0, np.where(st == ABOVE, cap, np.minimum(d.g_mol, cap)))
-    lo, med, hi = (float(v) for v in np.percentile(values[used], [_P_LO, _P_MID, _P_HI]))
+    lo, med, hi = (float(v) for v in np.percentile(values, [_P_LO, _P_MID, _P_HI]))
     rel_width = (hi - lo) / med if med > 0 else math.inf
     # An upper bound at the cap means "not bounded above", so it can never count as
     # resolved; otherwise capping would shrink the width and fake a resolved value.
     resolved = (frac_ok >= unc["dl_min_resolved_fraction"]
                 and rel_width < unc["max_relative_width"] and hi < cap)
-    return _Summary(lo, med, hi, int(used.sum()), frac_ok, rel_width, resolved)
+    return _Summary(lo, med, hi, frac_ok, rel_width, resolved)
 
 
 # ---------------------------------------------------------------- detection limit
@@ -244,25 +251,39 @@ def forward_leaf_temp(reading: LeafReading, g_s_mol_true: float, cfg: dict[str, 
 
 
 def detection_limit_mol(reading: LeafReading, cfg: dict[str, Any], cal: dict[str, Any],
-                        s: Sigmas, n: int, seed: int) -> float | None:
-    """Smallest true g_s on the grid that is resolved under this window's conditions."""
+                        s: Sigmas, n: int, seed: int) -> tuple[float | None, int]:
+    """(smallest true g_s on the grid resolved under this window's conditions or None,
+    number of grid points where no forward leaf temperature was found).
+
+    Roots are searched at every grid point, even after the limit is found, so the
+    count always describes the whole grid.
+    """
     unc = cfg["uncertainty"]
     light, e_s = _light_inputs(reading, cfg, cal)
     grid = np.geomspace(unc["dl_grid_min_mol"], unc["g_s_cap_mol"], int(unc["dl_grid_points"]))
+    dl: float | None = None
+    no_root = 0
     for g_true in grid:
         t_leaf = forward_leaf_temp(reading, float(g_true), cfg, cal)
         if t_leaf is None:
+            no_root += 1
             continue
-        if _summarise(_draw_at(t_leaf, reading, e_s, light.a_s_leaf, s, n, seed, cfg), cfg).resolved:
-            return float(g_true)
-    return None
+        if dl is None and _summarise(
+                _draw_at(t_leaf, reading, e_s, light.a_s_leaf, s, n, seed, cfg), cfg).resolved:
+            dl = float(g_true)
+    return dl, no_root
 
 
 # ---------------------------------------------------------------- public result
 
 @dataclass(frozen=True)
 class GsUncertainty:
-    """Monte Carlo summary for one window. g_s values in mol m-2 s-1."""
+    """Monte Carlo summary for one window. g_s values in mol m-2 s-1.
+
+    dl_grid_no_root of the dl_grid_points grid values had no forward leaf temperature.
+    If it is above 0, g_s_mol_dl = None may mean the search failed, not "nothing resolved".
+    frac_vpd_nonpositive is a diagnostic: those draws are kept (held at the cap or at 0).
+    """
     valid: bool
     reason: str
     g_s_mol_median: float | None
@@ -276,8 +297,9 @@ class GsUncertainty:
     relative_width: float | None
     resolved: bool
     g_s_mol_dl: float | None
+    dl_grid_points: int
+    dl_grid_no_root: int
     n_draws: int
-    n_used: int
     seed: int
     sigmas: Sigmas | None
     sigma_placeholder: bool
@@ -288,30 +310,32 @@ def gs_uncertainty(reading: LeafReading, cfg: dict[str, Any], cal: dict[str, Any
                    seed: int = 0) -> GsUncertainty:
     """Interval, censoring fractions, resolved label and detection limit for one window.
 
-    Windows that solve_gs marks invalid (missing_input, vpd_nonpositive) return an
-    invalid result with the same reason. Censored windows ARE processed.
+    Windows that solve_gs marks invalid (missing_input) return an invalid result with the
+    same reason. Censored windows, including VPD <= 0, ARE processed.
     """
     n = n if n is not None else int(cfg["uncertainty"]["n_draws"])
+    n_grid = int(cfg["uncertainty"]["dl_grid_points"])
     base = solve_gs(reading, cfg, cal)
     if not base.valid:
         return GsUncertainty(False, base.reason, None, None, None, False, None, None, None,
-                             None, None, False, None, n, 0, seed, sigmas,
+                             None, None, False, None, n_grid, 0, n, seed, sigmas,
                              sigmas.placeholder if sigmas else False)
     light, _ = _light_inputs(reading, cfg, cal)
     s = sigmas if sigmas is not None else get_sigmas(cfg, cal, light)
     d = gs_draws(reading, cfg, cal, s, n, seed)
     sm = _summarise(d, cfg)
     cap = float(cfg["uncertainty"]["g_s_cap_mol"])
+    dl, no_root = detection_limit_mol(reading, cfg, cal, s, n, seed)
     return GsUncertainty(
         valid=True, reason="ok",
         g_s_mol_median=sm.median, g_s_mol_lo=sm.lo, g_s_mol_hi=sm.hi,
         hi_at_cap=sm.hi is not None and sm.hi >= cap,
         frac_latent_nonpositive=float(np.mean(d.status == BELOW)),
         frac_above_range=float(np.mean(d.status == ABOVE)),
-        frac_vpd_nonpositive=float(np.mean(d.status == VPD)),
+        frac_vpd_nonpositive=float(np.mean(d.vpd <= 0)),
         frac_resolved=sm.frac_ok, relative_width=sm.rel_width, resolved=sm.resolved,
-        g_s_mol_dl=detection_limit_mol(reading, cfg, cal, s, n, seed),
-        n_draws=n, n_used=sm.n_used, seed=seed, sigmas=s, sigma_placeholder=s.placeholder)
+        g_s_mol_dl=dl, dl_grid_points=n_grid, dl_grid_no_root=no_root,
+        n_draws=n, seed=seed, sigmas=s, sigma_placeholder=s.placeholder)
 
 
 def attach_uncertainty(result: ConductanceResult, unc: GsUncertainty) -> ConductanceResult:
@@ -349,11 +373,13 @@ def card_rbh_uncertainty(reading: ReferenceCardReading, cfg: dict[str, Any],
         r_bH   = rho cp (T_card - T_air) / Rn                        (eq. 9)
 
     Draws with r_bH <= 0 are kept and counted. Draws with |Rn| < min_abs_rn_wm2 are
-    excluded from percentiles and counted. Readings that fail the T1.3 gate return invalid.
+    excluded from percentiles and counted; if that is every draw, the result is invalid
+    with reason rn_near_zero. Readings that solve_card_rbh marks invalid (including
+    suspect_card_rbh) return invalid with the same reason, so they cannot become labels.
     """
     n = n if n is not None else int(cfg["uncertainty"]["n_draws"])
     base = solve_card_rbh(reading, cfg, cal)
-    if base.reason not in ("ok", "suspect_card_rbh"):
+    if not base.valid:
         return CardUncertainty(False, base.reason, None, None, None, None, None, None,
                                n, seed, sigmas.placeholder if sigmas else False)
     light = get_light_source(cfg, cal, reading.light_source)
@@ -378,7 +404,7 @@ def card_rbh_uncertainty(reading: ReferenceCardReading, cfg: dict[str, Any],
         r_bh = rho_cp_j_m3_k(cfg) * (t_card - t_air) / rn
     used = r_bh[~near_zero]
     if used.size == 0:
-        return CardUncertainty(True, base.reason, None, None, None, None, None, 1.0,
+        return CardUncertainty(False, "rn_near_zero", None, None, None, None, None, 1.0,
                                n, seed, s.placeholder)
     lo, med, hi, m1, p1 = np.percentile(used, [_P_LO, _P_MID, _P_HI, _P_M1, _P_P1])
     return CardUncertainty(
@@ -410,6 +436,7 @@ class PooledGs:
     n_windows: int
     n_excluded: int
     n_censored_windows: int
+    flags: tuple[str, ...] = ()
 
 
 def pooled_gs_mol(readings: list[LeafReading], results: list[ConductanceResult],
@@ -423,11 +450,14 @@ def pooled_gs_mol(readings: list[LeafReading], results: list[ConductanceResult],
     Every valid window is used, INCLUDING censored ones: lambdaE is always measured, even
     when it is <= 0, so nothing is truncated. lambdaE is close to linear in the temperature
     errors, while g_s = 1/r_s is strongly curved, so averaging fluxes avoids the bias of
-    averaging g_s. Invalid windows (missing_input, vpd_nonpositive) are excluded and counted.
+    averaging g_s. Windows with VPD <= 0 are valid (censored) and are averaged in; dropping
+    them would cut the high-g_s end. Only invalid windows (missing_input) are excluded
+    and counted.
 
     Valid ONLY for windows that share one true g_s and one set of conditions (replicate
     windows on one leaf or plant); see docs/assumptions_and_limitations.md A37.
     Pooled lambdaE <= 0 -> censor below_detection; r_s <= 0 -> above_range (both valid).
+    Pooled VPD <= 0 adds flag vpd_nonpositive (with lambdaE > 0 it is then above_range).
     """
     if len(readings) != len(results):
         raise ValueError(f"readings and results must have the same length, "
@@ -446,10 +476,8 @@ def pooled_gs_mol(readings: list[LeafReading], results: list[ConductanceResult],
     t_a = float(np.mean([x.air_temp_c for x, _ in used]))
     means = dict(latent_wm2=latent, vpd_pa=vpd, r_bh=r_bh, pressure_hpa=p_hpa,
                  air_temp_c=t_a, n_windows=len(used), n_excluded=n_excluded,
-                 n_censored_windows=n_censored)
-
-    if vpd <= 0:
-        return PooledGs(None, None, valid=False, reason="vpd_nonpositive", censor="none", **means)
+                 n_censored_windows=n_censored,
+                 flags=("vpd_nonpositive",) if vpd <= 0 else ())
     if latent <= 0:
         return PooledGs(None, None, valid=True, reason="ok", censor="below_detection", **means)
     gamma = psychrometric_constant_pa(p_hpa, cfg)

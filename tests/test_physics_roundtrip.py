@@ -167,7 +167,7 @@ def test_every_physics_reason_code_and_censor_label(cfg, cal):
         # input -> (reason, censor, valid)
         "worked example": (leaf(), ("ok", "none", True)),
         "missing leaf temp": (leaf(leaf_temp_c=None), ("missing_input", "none", False)),
-        "saturated air": (leaf(relative_humidity_pct=100.0), ("vpd_nonpositive", "none", False)),
+        "saturated air": (leaf(relative_humidity_pct=100.0), ("ok", "above_range", True)),
         "warm leaf, low light": (leaf(leaf_temp_c=27.0, lux=1000.0),
                                  ("ok", "below_detection", True)),
         "very cold leaf": (leaf(leaf_temp_c=15.0), ("ok", "above_range", True)),
@@ -193,7 +193,8 @@ def test_every_physics_reason_code_and_censor_label(cfg, cal):
     assert jones.cwsi.reason == "references_not_bracketing"
     reasons.add(jones.cwsi.reason)
 
-    assert reasons == {"ok", "missing_input", "vpd_nonpositive", "low_card_signal",
+    assert "vpd_nonpositive" in solve_gs(gs_cases["saturated air"][0], c, cal).flags
+    assert reasons == {"ok", "missing_input", "low_card_signal",
                        "rn_near_zero", "suspect_card_rbh", "references_not_bracketing"}
     assert censors == set(CENSOR_LABELS)
 
@@ -248,6 +249,40 @@ def test_truncation_bias_pooled_recovers_truth(cfg, cal):
     pooled_err = np.abs(np.array(pooled) / g_true - 1.0)
     assert np.all(pooled_err <= 0.10), f"worst pooled error {pooled_err.max():.1%}"
     assert np.mean(truncated) > g_true
+
+
+def test_vpd_nonpositive_windows_kept_and_dropping_them_biases_low(cfg, cal):
+    """Session 8 review: humid air (RH 97 %), dim light (E_s 30 W m-2), true g_s 0.3 mol.
+    The true leaf is only about 0.4 C above air, so noise pushes about 5 % of windows to
+    VPD <= 0. They must be kept (censored above_range, flagged). Dropping them removes the
+    cold, high-g_s windows and pulls the pooled mean low (about -15 %); keeping them is
+    closer to the truth (about +6 %). Per-seed accuracy is NOT asserted: at these
+    conditions the noise is too large for the 10 % target (worst seed about 35 %)."""
+    c = with_faces(cfg, 1)
+    g_true, rh, e_s = 0.3, 97.0, 30.0
+    t_true = forward_leaf_temp(g_true, lambda t: 70.0, 24.0, 24.0, rh, 995.0, e_s, c)
+    kept, dropped, n_flagged = [], [], 0
+    for seed in range(N_SEEDS):
+        rng = np.random.default_rng(seed)
+        readings = [leaf(leaf_temp_c=t_true + SIGMA_LEAF_C * rng.normal(),
+                         air_temp_c=24.0 + SIGMA_AIR_C * rng.normal(),
+                         relative_humidity_pct=rh, lux=e_s / K_WM2_PER_LUX)
+                    for _ in range(N_WINDOWS)]
+        results = [solve_gs(x, c, cal) for x in readings]
+        flagged = ["vpd_nonpositive" in r.flags for r in results]
+        n_flagged += sum(flagged)
+        for r, f in zip(results, flagged):
+            if f:
+                assert r.valid and r.censor in ("above_range", "below_detection")
+        p = pooled_gs_mol(readings, results, c)
+        assert p.n_windows == N_WINDOWS and p.n_excluded == 0
+        kept.append(p.g_s_mol)
+        keep = [i for i, f in enumerate(flagged) if not f]
+        dropped.append(pooled_gs_mol([readings[i] for i in keep],
+                                     [results[i] for i in keep], c).g_s_mol)
+    assert n_flagged > 0
+    assert np.mean(dropped) < g_true
+    assert abs(np.mean(kept) / g_true - 1) < abs(np.mean(dropped) / g_true - 1)
 
 
 def test_truncation_bias_with_many_censored_windows(cfg, cal):

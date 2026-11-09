@@ -170,35 +170,76 @@ def test_censored_results_are_kept_in_batch(cfg1, cal):
     assert [r.valid for r in results] == [True, True, True, False]
 
 
-# ---------- vpd_nonpositive (owner decision, A30) ----------
+# ---------- VPD <= 0 (spec, Session 8 review: censored above_range + flag) ----------
 
 @pytest.mark.parametrize("leaf_temp_c", [
     23.0,   # VPD < 0 (e_s(23) 2809 < e_a 2984 Pa) with lambdaE > 0
     24.0,   # VPD = 0 exactly (leaf = air, RH 100)
 ])
-def test_vpd_nonpositive(cfg1, cal, leaf_temp_c):
+def test_vpd_nonpositive_is_above_range_and_kept(cfg1, cal, leaf_temp_c):
     r = solve_gs(leaf(leaf_temp_c=leaf_temp_c, relative_humidity_pct=100.0), cfg1, cal)
-    assert r.latent_wm2 > 0
-    assert r.valid is False and r.reason == "vpd_nonpositive" and r.censor == "none"
-    assert r.r_s is None and r.g_s_ms is None and r.g_s_mol is None
-    assert r.vpd_pa <= 0 and r.latent_wm2 is not None
+    assert r.latent_wm2 > 0 and r.vpd_pa <= 0
+    assert r.valid is True and r.reason == "ok" and r.censor == "above_range"
+    assert "vpd_nonpositive" in r.flags
+    # With VPD <= 0 and lambdaE > 0, eq. 8 gives r_s = (<= 0) - r_bw < 0.
+    assert r.r_s < 0 and r.g_s_ms is None and r.g_s_mol is None
 
 
-def test_vpd_nonpositive_wins_over_below_detection(cfg1, cal):
-    # VPD <= 0 needs leaf <= air, so H <= 0; lambdaE <= 0 then needs Rn clearly negative:
-    # no light and cold surroundings (10 C): Rn about -75, H about -8.6, lambdaE about -66.
-    # Both conditions hold -> vpd_nonpositive, not censored.
+def test_vpd_nonpositive_with_nonpositive_latent_is_below_detection(cfg1, cal):
+    # The spec rule covers lambdaE > 0 only. With lambdaE <= 0 the usual order applies
+    # (below_detection) and the flag is still set. No light, 10 C surroundings:
+    # Rn about -75, H about -8.6, lambdaE about -66 W m-2.
     r = solve_gs(leaf(leaf_temp_c=23.5, lux=0.0, surroundings_temp_c=10.0,
                       relative_humidity_pct=100.0), cfg1, cal)
     assert r.vpd_pa <= 0 and r.latent_wm2 <= 0
-    assert r.reason == "vpd_nonpositive" and r.censor == "none" and r.valid is False
+    assert r.valid is True and r.reason == "ok" and r.censor == "below_detection"
+    assert "vpd_nonpositive" in r.flags
 
 
-def test_small_positive_vpd_is_not_rejected(cfg1, cal):
+def test_small_positive_vpd_is_not_flagged(cfg1, cal):
     # No threshold: any VPD > 0 is solved normally (its uncertainty is T1.5's job).
     r = solve_gs(leaf(leaf_temp_c=24.05, relative_humidity_pct=100.0), cfg1, cal)
     assert 0 < r.vpd_pa < 20
-    assert r.reason == "ok" and r.valid
+    assert r.reason == "ok" and r.valid and "vpd_nonpositive" not in r.flags
+
+
+def test_negative_lux_is_missing_input(cfg1, cal):
+    assert solve_gs(leaf(lux=-1.0), cfg1, cal).reason == "missing_input"
+    assert solve_gs(leaf(lux=0.0), cfg1, cal).valid     # darkness is a real reading
+
+
+# ---------- independent hand calculation, faces = 2 (Session 8 review item 7) ----------
+
+def test_hand_calculation_two_faces(cfg, cal):
+    """Expected numbers were worked out by hand from the config constants, NOT with any
+    project function. Inputs: leaf 23.0, air 24.0, surroundings 24.0 C, RH 50 %, 995 hPa,
+    E_s 120 W m-2 (12000 lux x 0.01), a_s 0.85, e_L 0.97, faces 2, r_bH 70, ratio 0.93.
+
+      shortwave  0.85 x 120 = 102.000
+      T_s^4 = 296.15^4 = 7.69214e9 K^4;  T_sur^4 = 297.15^4 = 7.79656e9 K^4
+      longwave   2 x 0.97 x 5.670374419e-8 x (7.79656e9 - 7.69214e9) = 11.487
+      Rn         102.000 + 11.487 = 113.487 W m-2
+      rho cp     1.204 x 1005 = 1210.02;  H = 1210.02 x (23 - 24) / 70 = -17.286 W m-2
+      lambdaE    113.487 + 17.286 = 130.773 W m-2
+      e_s(23)    610.78 exp(17.27 x 23 / 260.3) = 2809.35 Pa
+      e_s(24)    610.78 exp(17.27 x 24 / 261.3) = 2983.82 Pa;  e_a = 1491.91 Pa
+      VPD        2809.35 - 1491.91 = 1317.44 Pa
+      gamma      0.0665 x 995 = 66.1675 Pa K-1
+      r_s+r_bw   1210.02 x 1317.44 / (66.1675 x 130.773) = 184.229 s m-1
+      r_s        184.229 - 0.93 x 70 = 119.129 s m-1;  g_s = 1/119.129 = 0.00839423 m s-1
+      molar      99500 / (8.314 x 297.15) = 40.2752 mol m-3;  g_s = 0.338079 mol m-2 s-1
+    """
+    c = copy.deepcopy(cfg)
+    assert c["physics"]["faces"] == 2          # the config default, not overridden
+    r = solve_gs(leaf(), c, cal)
+    assert r.valid and r.censor == "none"
+    assert r.rn_wm2 == pytest.approx(113.487, rel=1e-4)
+    assert r.h_wm2 == pytest.approx(-17.286, rel=1e-4)
+    assert r.latent_wm2 == pytest.approx(130.773, rel=1e-4)
+    assert r.vpd_pa == pytest.approx(1317.44, rel=1e-4)
+    assert r.r_s == pytest.approx(119.129, rel=1e-4)
+    assert r.g_s_ms == pytest.approx(0.00839423, rel=1e-4)
+    assert r.g_s_mol == pytest.approx(0.338079, rel=1e-4)
 
 
 # ---------- missing_input ----------

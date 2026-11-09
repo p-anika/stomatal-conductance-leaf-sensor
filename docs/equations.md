@@ -1,4 +1,4 @@
-<!-- Copy of docs/spec/08_appendix_A_equations.md, re-copied 2026-11-08 (T0.6, after T1.7). If the spec changes, re-copy it; do not edit equations here. -->
+<!-- Copy of docs/spec/08_appendix_A_equations.md, re-copied 2026-11-08 (T0.6, after the Session 8 review fixes). If the spec changes, re-copy it; do not edit equations here. -->
 
 ## Appendix A. Final equation set
 
@@ -30,6 +30,8 @@ All temperatures in °C except in the radiation term (kelvin). Symbols: T\_s lea
 
 **Validity rules:** g\_s has a point estimate when lambdaE > 0 and r\_s > 0. lambdaE ≤ 0 means g\_s is at or below the detection limit (censored, below\_detection) and r\_s ≤ 0 means it is above the measurable range (above\_range); both are kept, never dropped. Inputs must be usable: steady state reached and wind measured. For cards the gate is exogenous: absorbed shortwave of at least 40 W m⁻² and |Rn| ≥ 1 W m⁻²; the measured temperature difference is never used to select data.
 
-**Detection-limit rule (added in Session 6, decision A33).** A true g\_s counts as resolved only if all three hold: (1) in at least 90% of the Monte Carlo draws, latent heat flux is above zero, r\_s is above zero and VPD is above zero; (2) the relative 95% interval width is at most uncertainty.max\_relative\_width (config, 1.0); and (3) the 97.5th percentile is below uncertainty.g\_s\_cap\_mol (config, 2.0 mol m-2 s-1, UNVERIFIED). Draws with r\_s at or below zero are held at the cap, so an interval that reaches the cap is not bounded above and must not count as precise.
+**Detection-limit rule (added in Session 6, decision A33).** A true g\_s counts as resolved only if all three hold: (1) in at least 90% of the Monte Carlo draws, latent heat flux is above zero, r\_s is above zero and VPD is above zero; (2) the relative 95% interval width is below uncertainty.max\_relative\_width (config, 1.0); and (3) the 97.5th percentile is below uncertainty.g\_s\_cap\_mol (config, 2.0 mol m-2 s-1, UNVERIFIED). Draws with r\_s at or below zero are held at the cap, so an interval that reaches the cap is not bounded above and must not count as precise.
+
+**VPD at or below zero (decision from the Session 8 review).** If latent heat flux is positive while VPD is zero or negative, r\_s comes out negative, so the result is censored above\_range and flagged vpd\_nonpositive. It is not a failure and not a reason code. Such windows stay in every table, in pooled flux-space averages and in the Monte Carlo percentiles (their draws are held at the cap like any draw with r\_s at or below zero). Excluding them would remove the high-conductance end and bias means low.
 
 **Worked example (test fixture):** leaf 23.0, air 24.0, surroundings 24.0, RH 50%, 995 hPa, E\_s 120 W m⁻², a\_s 0.85, faces 1 (set explicitly; the config default is 2), r\_bH 70 s m⁻¹. Result: Rn 107.7, H −17.3, λE 125.0 W m⁻², VPD 1317 Pa, r\_s 127.6 s m⁻¹, g\_s 0.00784 m s⁻¹ = 0.316 mol m⁻² s⁻¹. A ±0.5 °C leaf-temperature error gives 0.402 and 0.250 mol m⁻² s⁻¹.

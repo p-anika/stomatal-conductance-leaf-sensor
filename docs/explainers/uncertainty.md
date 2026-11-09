@@ -11,28 +11,30 @@ Every sensor is a little wrong. This module asks: **"If each reading could be of
    - Humidity: measured + σ_RH × z₃, then **clipped to 0–100 %**. This clips the possible *true* humidity, not the result.
    - Light: E_s × exp(σ_lux × z₄), and r_bH: r_bH × exp(σ_rb × z₅). These are **lognormal**, so they can never go negative (see "Why").
    - Then it re-solves eqs. 1–8 for that draw (`solve_core`, a fast array version of `gs_calculator.solve_gs`; a test checks they agree to 10⁻⁹).
-3. Each draw is sorted into one of four outcomes:
+3. Each draw is sorted into one of three outcomes. **Every draw is used in the percentiles; none is left out.**
 
    | Draw outcome | Value used in the percentiles |
    | --- | --- |
-   | OK (λE > 0, r_s > 0) | g_s (mol), but no more than the cap |
+   | OK (λE > 0 and r_s > 0, which also means VPD > 0) | g_s (mol), but no more than the cap |
    | λE ≤ 0 | **0** (closed stomata; kept) |
-   | r_s ≤ 0 | **the cap**, g_s_cap_mol = 2.0 (kept) |
-   | VPD ≤ 0 | left out of the percentiles; its fraction is reported, and it counts as *not resolved* |
+   | r_s ≤ 0, including VPD ≤ 0 with λE > 0 | **the cap**, g_s_cap_mol = 2.0 (kept) |
 
-4. **`gs_uncertainty(...)`** returns `GsUncertainty`: the median, 2.5th and 97.5th percentiles; the fraction of draws with λE ≤ 0, r_s ≤ 0 and VPD ≤ 0; `frac_resolved`; `relative_width`; `resolved`; `hi_at_cap`; `g_s_mol_dl`; plus n, seed and the sigmas used.
-5. **Resolved label** (a label in the table, never a filter). A window is resolved when **all three** hold:
-   - at least 90 % of *all* draws are OK (`dl_min_resolved_fraction`)
-   - (p97.5 − p2.5) / median < 1.0 (`max_relative_width`)
-   - p97.5 < cap. An upper bound at the cap means "not bounded above", so it can't count as resolved.
+   A draw with VPD ≤ 0 and λE > 0 always has r_s < 0 (eq. 8), so it is held at the cap like any other r_s ≤ 0 draw (spec, Session 8 review). An earlier version left these draws out, which cut off the high-g_s end of the interval.
+4. **`gs_uncertainty(...)`** returns `GsUncertainty`: the median, 2.5th and 97.5th percentiles; the fraction of draws with λE ≤ 0, with r_s ≤ 0, and (as a diagnostic only) with VPD ≤ 0; `frac_resolved`; `relative_width`; `resolved`; `hi_at_cap`; `g_s_mol_dl`; `dl_grid_points` and `dl_grid_no_root` (see step 6); plus n, seed and the sigmas used.
+5. **Resolved label** (a label in the table, never a filter). A window is resolved only when **all three** hold:
+   1. at least 90 % of *all* draws are OK, meaning λE > 0, r_s > 0 and VPD > 0 (`dl_min_resolved_fraction`);
+   2. (p97.5 − p2.5) / median is **strictly below** 1.0 (`max_relative_width`); exactly 1.0 does not pass;
+   3. p97.5 is **strictly below** the cap. An upper bound at the cap means "not bounded above", so it can't count as resolved.
 6. **Detection limit `g_s_mol_dl`.** On a log-spaced grid of 60 "true" g_s values (0.001 to 2.0 mol m⁻² s⁻¹), the module:
    1. works out the leaf temperature each true g_s *would* produce under this window's air, humidity, light, r_b and pressure (`forward_leaf_temp`, root finding);
    2. adds the same kind of random errors;
    3. checks the resolved rule.
 
-   The smallest true g_s that passes is the detection limit. If none passes, it is `None`, meaning the setup can't resolve anything in these conditions.
+   The smallest true g_s that passes is the detection limit. If none passes, it is `None`. Step 1 can fail: if no leaf temperature within ±40 °C of air balances the energy budget for some true g_s, that grid point is skipped. The result counts these skips in `dl_grid_no_root` (out of `dl_grid_points`, 60). So there are two different kinds of `None`:
+   - `dl_grid_no_root = 0`: every grid point was tested and none was resolved. The setup can't resolve anything in these conditions.
+   - `dl_grid_no_root > 0`: some (or all) grid points could not be tested. `None` may then be a search failure, not a measurement fact; check the inputs.
 7. **`attach_uncertainty(result, unc)`** copies `g_s_mol_dl`, `g_s_lo` and `g_s_hi` (all in mol m⁻² s⁻¹) onto the T1.4 result. Nothing is dropped, and the censor label is unchanged.
-8. **`card_rbh_uncertainty(...)`** handles the card. It draws card temperature (σ_leaf, same camera), air temperature (σ_air, correlated by ρ) and an Rn multiplier (1 + σ_rn_card × z, Gaussian as in the spec). It recomputes r_bH = ρcₚ(T_card − T_air)/Rn and reports the median, p2.5, p97.5, the **robust sigma = (p84.13 − p15.87)/2**, and the fraction of draws with r_bH ≤ 0. Draws are kept even when r_bH ≤ 0. Draws with |Rn| < 1 W m⁻² are left out of the percentiles and counted.
+8. **`card_rbh_uncertainty(...)`** handles the card. It draws card temperature (σ_leaf, same camera), air temperature (σ_air, correlated by ρ) and an Rn multiplier (1 + σ_rn_card × z, Gaussian as in the spec). It recomputes r_bH = ρcₚ(T_card − T_air)/Rn and reports the median, p2.5, p97.5, the **robust sigma = (p84.13 − p15.87)/2**, and the fraction of draws with r_bH ≤ 0. Draws are kept even when r_bH ≤ 0. Draws with |Rn| < 1 W m⁻² are left out of the percentiles (r_bH would divide by almost zero) and counted; if **every** draw is like that, the result is `valid=False, reason=rn_near_zero`. A card reading that `solve_card_rbh` already rejects (`low_card_signal`, `rn_near_zero`, `suspect_card_rbh`, `missing_input`) comes back `valid=False` with the same reason, so a suspect card can never be used as a training label by mistake. (Its r_bH value is still kept by `solve_card_rbh` for the rejects file and the count.)
 
 ## How the sigmas are chosen, and where each value comes from
 **Every value below is a pre-calibration placeholder.** None of them has been measured on this equipment yet. They are listed in `docs/decision_log.md` (2026-11-08, T1.5) so you can replace them. To replace one, put the measured value in `calibration.json` under `"uncertainty"` with the same key. The code then uses it automatically and marks it "calibration".
@@ -97,10 +99,19 @@ So the temperature errors dominate the card label, which is why they are include
 **What it does.** A drought-stressed leaf can have g_s so low that sensor noise pushes some windows to λE ≤ 0. Those windows are labelled below_detection and have no g_s value. If you average only the windows that do have a g_s, the answer comes out too high, because you threw away exactly the windows where the leaf looked most closed. This is called *truncation bias*. `pooled_gs_mol(readings, results, cfg)` gives one g_s for a group of windows without that bias.
 
 **How it works.**
-1. Keep every valid window, censored ones included. λE is always computed, even when it is ≤ 0, so no window has a "missing" value. Invalid windows (missing_input, vpd_nonpositive) are left out and counted in `n_excluded`.
+1. Keep every valid window, censored ones included, and that includes windows with VPD ≤ 0 (censored above_range, flag vpd_nonpositive). λE and VPD are always computed, even when they are ≤ 0, so no window has a "missing" value. Only invalid windows (missing_input) are left out and counted in `n_excluded`.
 2. Average λE [W m⁻²], VPD [Pa], r_bH [s m⁻¹], pressure [hPa] and air temperature [°C] over those windows.
 3. Apply eq. 8 once to the averages: r_s = ρcₚ·VPD / (γ·λE) − 0.93·r_bH, then g_s,mol = (1/r_s)·P / (R·T_a).
-4. If the mean λE ≤ 0 the group is below_detection; if r_s ≤ 0 it is above_range. Both are valid results, as for a single window.
+4. If the mean λE ≤ 0 the group is below_detection; if r_s ≤ 0 it is above_range. Both are valid results, as for a single window. If the mean VPD ≤ 0, the result also gets the flag vpd_nonpositive.
+
+**Why the VPD ≤ 0 windows must stay in.** In humid air, noise can push a cool, fast-transpiring leaf's reading below the dew point, so its VPD comes out ≤ 0. Those are the high-g_s windows. In a simulation (RH 97 %, E_s 30 W m⁻², true g_s 0.3 mol m⁻² s⁻¹, σ_leaf 0.5 °C, σ_air 0.25 °C, 200 windows × 20 seeds), about 5 % of windows had VPD ≤ 0:
+
+| Pooled estimate | Mean error over 20 seeds |
+| --- | --- |
+| all windows kept (the code) | about +6 % |
+| VPD ≤ 0 windows dropped (old behaviour) | about −15 % |
+
+At RH 98 % (13 % of windows flagged) dropping them gave about −47 %. The test `test_vpd_nonpositive_windows_kept_and_dropping_them_biases_low` checks the direction. The per-seed error is large at these conditions (worst seed about 35 %), so the 10 % target is not claimed for humid, dim conditions.
 
 Units check for step 3: ρcₚ [J m⁻³ K⁻¹] × VPD [Pa] / (γ [Pa K⁻¹] × λE [W m⁻² = J s⁻¹ m⁻²]) = J m⁻³ / (J s⁻¹ m⁻²) = s m⁻¹, the same units as r_bH. ✓
 
@@ -137,12 +148,13 @@ Note: at 0.05 mol and σ_leaf 0.5 °C almost no window is censored, so the +3.9 
 4. It does not give an interval. Bootstrapping over windows would; not done yet.
 
 ## Methods paragraph (draft)
-Measurement uncertainty was propagated by Monte Carlo simulation (2000 draws per window, fixed seed). Leaf and air temperature errors were drawn as correlated normal deviates (σ = [x] and [y] °C, correlation [ρ], from calibration against a common reference thermometer); relative humidity errors were normal (σ = [z] %) with draws limited to 0–100 %; irradiance and boundary-layer resistance errors were lognormal (log-SD [a] and [b]). Each draw was re-solved with the full energy-balance model. Draws with non-positive latent heat flux were assigned g_s = 0 and draws with non-positive stomatal resistance were assigned the upper limit of the measurable range (2.0 mol m⁻² s⁻¹), so that intervals include closed- and fully-open-stomata outcomes; draws with non-positive VPD were excluded and their fraction reported. Intervals are the 2.5th–97.5th percentiles. A window was labelled resolved when ≥ 90 % of draws gave a positive, finite g_s and the relative 95 % interval width was below 1.0. The per-window detection limit was the smallest true g_s, on a logarithmic grid, meeting that criterion under the window's conditions. Resolved status was reported, not used to exclude data. Software: Python 3.13, NumPy, SciPy [versions].
+Measurement uncertainty was propagated by Monte Carlo simulation (2000 draws per window, fixed seed). Leaf and air temperature errors were drawn as correlated normal deviates (σ = [x] and [y] °C, correlation [ρ], from calibration against a common reference thermometer); relative humidity errors were normal (σ = [z] %) with draws limited to 0–100 %; irradiance and boundary-layer resistance errors were lognormal (log-SD [a] and [b]). Each draw was re-solved with the full energy-balance model. Draws with non-positive latent heat flux were assigned g_s = 0 and draws with non-positive stomatal resistance were assigned the upper limit of the measurable range (2.0 mol m⁻² s⁻¹), so that intervals include closed- and fully-open-stomata outcomes; draws with non-positive VPD and positive latent heat flux have non-positive r_s and were therefore also assigned the upper limit. No draw was excluded. Intervals are the 2.5th–97.5th percentiles. A window was labelled resolved only when all three of the following held: at least 90 % of draws had positive latent heat flux, positive r_s and positive VPD; the relative 95 % interval width, (p97.5 − p2.5)/median, was strictly below 1.0; and the 97.5th percentile was strictly below the upper limit of the measurable range. The per-window detection limit was the smallest true g_s, on a logarithmic grid, meeting all three criteria under the window's conditions; grid points for which no leaf temperature satisfied the energy balance were counted and reported. Resolved status was reported, not used to exclude data. Software: Python 3.13, NumPy, SciPy [versions].
 
 ## Limitations
 1. **All sigmas are placeholders.** With them, nothing is resolved and the detection limit is undefined (see the worked example). Thermal calibration (T7.5) and light calibration are needed first.
 2. **Pressure and surroundings temperature are not perturbed** (C3). If T_sur is taken from the air sensor, its error is really shared with T_air. The longwave effect is about 5.7 W m⁻² K⁻¹ per face, small next to H (≈ 17 W m⁻² K⁻¹ at r_b = 70).
 3. **Errors are assumed independent between inputs** (except the leaf–air ρ) and **normal or lognormal**. A calibration offset that is the same in every window is not random within a session; it shifts all windows together.
+   - **The card and the leaf share the air thermometer** (register A38). With card_direct, one T_air error enters both the card's r_bH = ρcₚ(T_card − T_air)/Rn_card and the leaf's H = ρcₚ(T_leaf − T_air)/r_bH. Here the r_bH error (σ_rb) is drawn separately from the T_air error, so this correlation is ignored and the interval may be too wide or too narrow. It should be modelled in T6.1, where synthetic cards and leaves are generated together: one T_air error per window, applied to both.
 4. **The detection limit uses a grid** with steps of about 12 % in g_s, so it is accurate to about one grid step.
 5. **The resolved band has an upper end too.** At very high g_s the leaf is close to the wet limit and r_s ≤ 0 draws appear, so high values can also be unresolved. Only the lower limit is reported.
 6. **The cap (2.0 mol m⁻² s⁻¹) is UNVERIFIED.** It is chosen to be above typical soybean maxima, which have not been checked here.

@@ -16,9 +16,13 @@ Censoring (A15): censored results are VALID and must never be dropped.
   - r_s <= 0     -> censor = above_range. r_s holds the (<= 0) value; g_s_ms, g_s_mol None.
 Rn, H, lambdaE and VPD are always filled when inputs are usable.
 
-VPD <= 0 (checked first, before censoring) -> valid False, reason vpd_nonpositive,
-censor none; r_s, g_s_ms, g_s_mol None. Owner-approved code, not in the spec's list
-(decision_log 2026-11-08).
+VPD <= 0 (spec, Session 8 review): NOT a failure. Flag vpd_nonpositive is added and the
+usual order applies. With lambdaE > 0, eq. 8 gives r_s = (<= 0) - r_bw < 0, so the result
+is censored above_range (valid). With lambdaE <= 0 it is below_detection (the spec covers
+only lambdaE > 0; decision_log 2026-11-08). These windows stay in every table.
+
+Bad data (missing_input): non-finite input, r_bh <= 0, pressure <= 0, RH outside 0-100,
+lux < 0.
 
 g_s_mol_dl, g_s_lo, g_s_hi are None here; uncertainty.py (T1.5) fills them.
 Inputs must be window means (T3.4 checks steady state and wind upstream).
@@ -108,7 +112,7 @@ def _inputs_usable(reading: LeafReading, include_longwave: bool) -> bool:
     if not all(_is_number(x) for x in needed):
         return False
     # Physical range checks: bad data -> missing_input, never an exception.
-    return (reading.r_bh > 0 and reading.pressure_hpa > 0
+    return (reading.r_bh > 0 and reading.pressure_hpa > 0 and reading.lux >= 0
             and 0.0 <= reading.relative_humidity_pct <= 100.0)
 
 
@@ -146,10 +150,10 @@ def solve_gs(reading: LeafReading, cfg: dict[str, Any], cal: dict[str, Any]) -> 
     vpd = saturation_vapor_pressure_pa(t_s, cfg) - e_a
     fluxes = dict(rn_wm2=rn, h_wm2=h, latent_wm2=latent, vpd_pa=vpd)
 
-    # Checked before censoring: with VPD <= 0 eq. 8 has no meaning (condensation or
-    # sensor error), so neither censor label applies. No threshold: exactly <= 0.
+    # A flag, not a rejection: dropping cold-leaf windows would cut the high-g_s end
+    # and bias means low (selection on the measured leaf temperature). Exactly <= 0.
     if vpd <= 0:
-        return _result(flags, valid=False, reason="vpd_nonpositive", **fluxes)
+        flags = flags + ("vpd_nonpositive",)
 
     if latent <= 0:
         # A15: closed stomata within noise. Keep the window, label it.

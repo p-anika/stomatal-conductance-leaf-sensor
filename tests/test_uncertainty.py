@@ -5,8 +5,8 @@ flux-space estimate used by the truncation test (item 5, tests/test_physics_roun
 is unit-tested at the end of this file (owner decision A, 2026-11-08).
 
 Owner decisions tested here (2026-11-08): lognormal light and r_b errors; humidity draws
-clipped to 0-100; VPD <= 0 draws excluded from percentiles but counted as not resolved;
-lambdaE <= 0 draws count as g_s = 0 and r_s <= 0 draws as the cap; nothing is dropped.
+clipped to 0-100; lambdaE <= 0 draws count as g_s = 0 and r_s <= 0 draws (including
+VPD <= 0 with lambdaE > 0, Session 8 review) as the cap; nothing is dropped.
 """
 import copy
 import dataclasses
@@ -23,7 +23,6 @@ from processing.uncertainty import (
     ABOVE,
     BELOW,
     OK,
-    VPD,
     Sigmas,
     attach_uncertainty,
     card_rbh_uncertainty,
@@ -91,9 +90,7 @@ def test_core_matches_solve_gs(cfg1, cal, kw, faces):
     assert out["rn"][0] == pytest.approx(ref.rn_wm2, rel=1e-9)
     assert out["latent"][0] == pytest.approx(ref.latent_wm2, rel=1e-9)
     assert out["vpd"][0] == pytest.approx(ref.vpd_pa, rel=1e-9)
-    if ref.reason == "vpd_nonpositive":
-        assert out["status"][0] == VPD
-    elif ref.censor == "below_detection":
+    if ref.censor == "below_detection":
         assert out["status"][0] == BELOW
     elif ref.censor == "above_range":
         assert out["status"][0] == ABOVE
@@ -170,7 +167,6 @@ def test_below_detection_window_keeps_all_draws(cfg1, cal):
     u = gs_uncertainty(r, cfg1, cal)
     assert u.valid and u.frac_latent_nonpositive > 0.5
     assert u.g_s_mol_lo == 0.0              # closed stomata are inside the interval
-    assert u.n_used == u.n_draws            # nothing dropped (no VPD <= 0 here)
     assert u.resolved is False
 
 
@@ -190,13 +186,26 @@ def test_cap_cannot_fake_resolved(cfg1, cal):
     assert u.hi_at_cap and u.relative_width < 1.0 and u.resolved is False
 
 
-def test_vpd_draws_excluded_but_counted(cfg1, cal):
-    # Air near saturation, leaf barely warmer: many draws have VPD <= 0.
+def test_vpd_draws_kept_in_percentiles_at_cap(cfg1, cal):
+    # Air near saturation, leaf barely warmer: many draws have VPD <= 0. They are NOT
+    # excluded: with lambdaE > 0 they are held at the cap (like r_s <= 0), else at 0.
     r = leaf(leaf_temp_c=24.1, relative_humidity_pct=99.0)
+    d = gs_draws(r, cfg1, cal)
+    vpd_bad = d.vpd <= 0
+    assert 0 < vpd_bad.mean() < 1
+    assert np.all(np.isin(d.status[vpd_bad], [ABOVE, BELOW]))
+    assert np.all(d.status[vpd_bad & (d.latent > 0)] == ABOVE)
     u = gs_uncertainty(r, cfg1, cal)
-    assert 0 < u.frac_vpd_nonpositive < 1
-    assert u.n_used == round(u.n_draws * (1 - u.frac_vpd_nonpositive))
+    assert u.frac_vpd_nonpositive == pytest.approx(vpd_bad.mean())
     assert u.frac_resolved <= 1 - u.frac_vpd_nonpositive
+    # Percentiles use every draw: recompute them by hand from all n values.
+    cap = cfg1["uncertainty"]["g_s_cap_mol"]
+    values = np.where(d.status == BELOW, 0.0,
+                      np.where(d.status == ABOVE, cap, np.minimum(d.g_mol, cap)))
+    assert len(values) == u.n_draws
+    lo, med, hi = np.percentile(values, [2.5, 50, 97.5])
+    assert (u.g_s_mol_lo, u.g_s_mol_median, u.g_s_mol_hi) == pytest.approx((lo, med, hi))
+    assert u.g_s_mol_hi == cap
 
 
 def test_invalid_reading_returns_invalid(cfg1, cal):
@@ -204,9 +213,15 @@ def test_invalid_reading_returns_invalid(cfg1, cal):
     assert u.valid is False and u.reason == "missing_input" and u.g_s_mol_dl is None
 
 
-def test_vpd_nonpositive_window_is_invalid(cfg1, cal):
+def test_vpd_nonpositive_window_is_processed(cfg1, cal):
     u = gs_uncertainty(leaf(relative_humidity_pct=100.0), cfg1, cal)
-    assert u.valid is False and u.reason == "vpd_nonpositive"
+    assert u.valid is True and u.reason == "ok"
+    assert u.hi_at_cap is True and u.resolved is False
+
+
+def test_negative_lux_window_is_invalid(cfg1, cal):
+    u = gs_uncertainty(leaf(lux=-5.0), cfg1, cal)
+    assert u.valid is False and u.reason == "missing_input"
 
 
 # ---------- detection limit ----------
@@ -234,6 +249,23 @@ def test_detection_limit_grows_with_noise(cfg1, cal):
     lo = gs_uncertainty(leaf(), cfg1, cal, sigmas=only(leaf_temp_c=0.1, air_temp_c=0.05))
     hi = gs_uncertainty(leaf(), cfg1, cal, sigmas=only(leaf_temp_c=0.4, air_temp_c=0.2))
     assert lo.g_s_mol_dl < hi.g_s_mol_dl
+
+
+def test_detection_limit_counts_grid_points_without_root(cfg1, cal, monkeypatch):
+    """A None detection limit must say WHY: no grid value resolved, or no root found."""
+    import processing.uncertainty as unc_mod
+    s = only(**CALIBRATED_LIKE)
+    ok = gs_uncertainty(leaf(), cfg1, cal, sigmas=s)
+    assert ok.dl_grid_points == cfg1["uncertainty"]["dl_grid_points"]
+    assert ok.dl_grid_no_root == 0
+    # Placeholders: every grid point has a root but none is resolved.
+    none_resolved = gs_uncertainty(leaf(), cfg1, cal)
+    assert none_resolved.g_s_mol_dl is None and none_resolved.dl_grid_no_root == 0
+    # Shrink the root search to nothing: every grid point fails, and that is reported.
+    monkeypatch.setattr(unc_mod, "_FORWARD_SPAN_C", 1e-9)
+    failed = gs_uncertainty(leaf(), cfg1, cal, sigmas=s)
+    assert failed.g_s_mol_dl is None
+    assert failed.dl_grid_no_root == failed.dl_grid_points
 
 
 def test_detection_limit_meaning(cfg1, cal):
@@ -323,6 +355,25 @@ def test_card_keeps_nonpositive_draws(cfg1, cal):
     assert u.frac_nonpositive > 0.2 and u.r_bh_lo < 0
 
 
+def test_card_suspect_reading_is_invalid(cfg1, cal):
+    # Card colder than air: solve_card_rbh says suspect_card_rbh (invalid), so must this.
+    assert solve_card_rbh(card(card_temp_c=23.0), cfg1, cal).reason == "suspect_card_rbh"
+    u = card_rbh_uncertainty(card(card_temp_c=23.0), cfg1, cal)
+    assert u.valid is False and u.reason == "suspect_card_rbh"
+    assert u.r_bh_median is None
+
+
+def test_card_all_draws_rn_near_zero_is_invalid(cfg1, cal, monkeypatch):
+    """If every drawn Rn is below min_abs_rn_wm2 there is nothing to summarise:
+    invalid, reason rn_near_zero (never valid with empty numbers)."""
+    import processing.uncertainty as unc_mod
+    monkeypatch.setattr(unc_mod, "net_radiation_wm2",
+                        lambda *a, **k: np.zeros_like(np.asarray(a[2], dtype=float)))
+    u = card_rbh_uncertainty(card(), cfg1, cal)
+    assert u.valid is False and u.reason == "rn_near_zero"
+    assert u.frac_rn_near_zero == 1.0 and u.r_bh_median is None
+
+
 def test_card_invalid_passthrough(cfg1, cal):
     u = card_rbh_uncertainty(card(lux=100.0), cfg1, cal)
     assert u.valid is False and u.reason == "low_card_signal"
@@ -386,9 +437,26 @@ def test_pooled_above_range(cfg1, cal):
 
 
 def test_pooled_excludes_and_counts_invalid_windows(cfg1, cal):
-    p = _pool([leaf(), leaf(leaf_temp_c=None), leaf(relative_humidity_pct=100.0)], cfg1, cal)
-    assert p.n_windows == 1 and p.n_excluded == 2
+    p = _pool([leaf(), leaf(leaf_temp_c=None)], cfg1, cal)
+    assert p.n_windows == 1 and p.n_excluded == 1
     assert p.g_s_mol == pytest.approx(solve_gs(leaf(), cfg1, cal).g_s_mol, rel=1e-12)
+
+
+def test_pooled_keeps_vpd_nonpositive_windows(cfg1, cal):
+    """Hand check: a window with VPD <= 0 (censored above_range) is averaged in like any
+    other window, so the mean VPD and mean lambdaE include it."""
+    readings = [leaf(), leaf(), leaf(relative_humidity_pct=100.0)]   # VPD 1317, 1317, -174 Pa
+    results = [solve_gs(x, cfg1, cal) for x in readings]
+    assert results[2].vpd_pa < 0 and results[2].censor == "above_range"
+    le = sum(r.latent_wm2 for r in results) / 3
+    vpd = sum(r.vpd_pa for r in results) / 3
+    r_s = 1.204 * 1005.0 * vpd / (0.0665 * 995.0 * le) - 0.93 * 70.0
+    g_mol = (1.0 / r_s) * 99500.0 / (8.314 * (24.0 + 273.15))
+    p = pooled_gs_mol(readings, results, cfg1)
+    assert p.n_windows == 3 and p.n_excluded == 0 and p.n_censored_windows == 1
+    assert p.vpd_pa == pytest.approx(vpd) and p.latent_wm2 == pytest.approx(le)
+    assert p.censor == "none" and p.g_s_mol == pytest.approx(g_mol, rel=1e-9)
+    assert p.flags == ()
 
 
 def test_pooled_all_invalid_is_invalid(cfg1, cal):
@@ -399,11 +467,11 @@ def test_pooled_all_invalid_is_invalid(cfg1, cal):
 
 
 def test_pooled_nonpositive_mean_vpd(cfg1, cal):
-    """Each window has VPD > 0 only if solved; force a pooled VPD <= 0 by hand-made results."""
-    r = solve_gs(leaf(), cfg1, cal)
-    bad = dataclasses.replace(r, vpd_pa=-1.0)
-    p = pooled_gs_mol([leaf()], [bad], cfg1)
-    assert p.valid is False and p.reason == "vpd_nonpositive"
+    """Pooled VPD <= 0 with pooled lambdaE > 0: censored above_range, flagged, valid."""
+    p = _pool([leaf(relative_humidity_pct=100.0)] * 3, cfg1, cal)
+    assert p.vpd_pa < 0 and p.latent_wm2 > 0
+    assert p.valid is True and p.reason == "ok" and p.censor == "above_range"
+    assert p.flags == ("vpd_nonpositive",) and p.r_s < 0 and p.g_s_mol is None
 
 
 def test_pooled_length_mismatch_raises(cfg1, cal):
