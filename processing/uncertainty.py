@@ -386,3 +386,75 @@ def card_rbh_uncertainty(reading: ReferenceCardReading, cfg: dict[str, Any],
         r_bh_hi=float(hi), r_bh_sigma=float((p1 - m1) / 2.0),
         frac_nonpositive=float(np.mean(used <= 0)), frac_rn_near_zero=float(np.mean(near_zero)),
         n_draws=n, seed=seed, sigma_placeholder=s.placeholder)
+
+
+# ---------------------------------------------------------------- pooled estimate
+
+@dataclass(frozen=True)
+class PooledGs:
+    """Censoring-aware g_s for a group of windows that share one true g_s (T1.7 item 5).
+
+    Units: g_s_mol mol m-2 s-1, r_s s m-1, latent_wm2 W m-2, vpd_pa Pa, r_bh s m-1,
+    pressure_hpa hPa, air_temp_c deg C (all are means over the windows used).
+    """
+    g_s_mol: float | None
+    r_s: float | None
+    latent_wm2: float | None
+    vpd_pa: float | None
+    r_bh: float | None
+    pressure_hpa: float | None
+    air_temp_c: float | None
+    valid: bool
+    reason: str
+    censor: str
+    n_windows: int
+    n_excluded: int
+    n_censored_windows: int
+
+
+def pooled_gs_mol(readings: list[LeafReading], results: list[ConductanceResult],
+                  cfg: dict[str, Any]) -> PooledGs:
+    """Pool windows in flux space, then convert to g_s once (owner decision A, 2026-11-08).
+
+        mean lambdaE, mean VPD, mean r_bH, mean P, mean T_a over the valid windows
+        r_s = rho cp x VPD / (gamma(P) x lambdaE) - ratio x r_bH        s m-1   (eq. 8)
+        g_s,mol = (1 / r_s) x P_Pa / (R x T_a_K)                        mol m-2 s-1
+
+    Every valid window is used, INCLUDING censored ones: lambdaE is always measured, even
+    when it is <= 0, so nothing is truncated. lambdaE is close to linear in the temperature
+    errors, while g_s = 1/r_s is strongly curved, so averaging fluxes avoids the bias of
+    averaging g_s. Invalid windows (missing_input, vpd_nonpositive) are excluded and counted.
+
+    Valid ONLY for windows that share one true g_s and one set of conditions (replicate
+    windows on one leaf or plant); see docs/assumptions_and_limitations.md A37.
+    Pooled lambdaE <= 0 -> censor below_detection; r_s <= 0 -> above_range (both valid).
+    """
+    if len(readings) != len(results):
+        raise ValueError(f"readings and results must have the same length, "
+                         f"got {len(readings)} and {len(results)}")
+    used = [(x, r) for x, r in zip(readings, results) if r.valid]
+    n_excluded = len(results) - len(used)
+    n_censored = sum(r.censor != "none" for _, r in used)
+    if not used:
+        return PooledGs(None, None, None, None, None, None, None, False, "missing_input",
+                        "none", 0, n_excluded, 0)
+
+    latent = float(np.mean([r.latent_wm2 for _, r in used]))
+    vpd = float(np.mean([r.vpd_pa for _, r in used]))
+    r_bh = float(np.mean([x.r_bh for x, _ in used]))
+    p_hpa = float(np.mean([x.pressure_hpa for x, _ in used]))
+    t_a = float(np.mean([x.air_temp_c for x, _ in used]))
+    means = dict(latent_wm2=latent, vpd_pa=vpd, r_bh=r_bh, pressure_hpa=p_hpa,
+                 air_temp_c=t_a, n_windows=len(used), n_excluded=n_excluded,
+                 n_censored_windows=n_censored)
+
+    if vpd <= 0:
+        return PooledGs(None, None, valid=False, reason="vpd_nonpositive", censor="none", **means)
+    if latent <= 0:
+        return PooledGs(None, None, valid=True, reason="ok", censor="below_detection", **means)
+    gamma = psychrometric_constant_pa(p_hpa, cfg)
+    r_s = rho_cp_j_m3_k(cfg) * vpd / (gamma * latent) - cfg["physics"]["rbw_to_rbh_ratio"] * r_bh
+    if r_s <= 0:
+        return PooledGs(None, r_s, valid=True, reason="ok", censor="above_range", **means)
+    g_mol = molar_density_mol_m3(p_hpa, t_a, cfg) / r_s
+    return PooledGs(g_mol, r_s, valid=True, reason="ok", censor="none", **means)

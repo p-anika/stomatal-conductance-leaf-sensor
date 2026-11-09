@@ -92,6 +92,50 @@ Spec worked-example window: leaf 23.0, air 24.0, surroundings 24.0 °C, RH 50 %,
 
 So the temperature errors dominate the card label, which is why they are included (owner decision).
 
+## Pooled estimate for groups of windows (pooled_gs_mol, T1.7)
+
+**What it does.** A drought-stressed leaf can have g_s so low that sensor noise pushes some windows to λE ≤ 0. Those windows are labelled below_detection and have no g_s value. If you average only the windows that do have a g_s, the answer comes out too high, because you threw away exactly the windows where the leaf looked most closed. This is called *truncation bias*. `pooled_gs_mol(readings, results, cfg)` gives one g_s for a group of windows without that bias.
+
+**How it works.**
+1. Keep every valid window, censored ones included. λE is always computed, even when it is ≤ 0, so no window has a "missing" value. Invalid windows (missing_input, vpd_nonpositive) are left out and counted in `n_excluded`.
+2. Average λE [W m⁻²], VPD [Pa], r_bH [s m⁻¹], pressure [hPa] and air temperature [°C] over those windows.
+3. Apply eq. 8 once to the averages: r_s = ρcₚ·VPD / (γ·λE) − 0.93·r_bH, then g_s,mol = (1/r_s)·P / (R·T_a).
+4. If the mean λE ≤ 0 the group is below_detection; if r_s ≤ 0 it is above_range. Both are valid results, as for a single window.
+
+Units check for step 3: ρcₚ [J m⁻³ K⁻¹] × VPD [Pa] / (γ [Pa K⁻¹] × λE [W m⁻² = J s⁻¹ m⁻²]) = J m⁻³ / (J s⁻¹ m⁻²) = s m⁻¹, the same units as r_bH. ✓
+
+**Why flux space.** λE = Rn − H changes almost in a straight line with a temperature error (about 23 W m⁻² per °C at r_b = 70 s m⁻¹). g_s = 1/r_s is strongly curved: in the worked example −0.5 °C gives +27 % but +0.5 °C gives only −21 %. Averaging a curved quantity over noisy inputs gives a biased average even when nothing is censored. Averaging the straight-line quantity first and converting once avoids both problems. The alternative tested and rejected was a Tobit fit (a normal distribution cut off at g_s = 0). It still came out 15 % high on average at 0.02 mol m⁻² s⁻¹, because g_s errors are not normal.
+
+**Worked example (the T1.7 truncation test).** True g_s 0.05 mol m⁻² s⁻¹, worked-example conditions (air 24 °C, RH 50 %, 995 hPa, E_s 120 W m⁻², r_bH 70 s m⁻¹, faces 1). The true leaf temperature from the energy balance is 26.60 °C. Each of 200 windows gets independent normal errors on leaf temperature (σ_leaf) and air temperature (σ_air = σ_leaf / 2). This is repeated with 20 random seeds. Error is the estimate divided by the truth, minus 1.
+
+| σ_leaf (°C) | σ_air (°C) | Pooled: mean error | Pooled: worst of 20 seeds | Truncated mean: mean error | Windows censored |
+| --- | --- | --- | --- | --- | --- |
+| 0.25 | 0.125 | +0.5 % | 2.9 % | +1.2 % | 0.0 % |
+| **0.5** | **0.25** | **+0.9 %** | **5.7 %** | **+3.9 %** | 0.0 % |
+| 1.0 | 0.5 | +1.6 % | 11.4 % | +20.3 % | 4.3 % |
+
+Same at true g_s 0.02 mol m⁻² s⁻¹ (true leaf 27.57 °C):
+
+| σ_leaf (°C) | Pooled: mean error | Pooled: worst of 20 seeds | Truncated mean: mean error | Windows censored |
+| --- | --- | --- | --- | --- |
+| 0.25 | +0.9 % | 5.4 % | +2.2 % | 0.1 % |
+| 0.5 | +1.7 % | 10.8 % | +14.2 % | 5.4 % |
+| 1.0 | +3.3 % | 21.6 % | +71.6 % | 20.6 % |
+
+The test asserts only the bold row: the pooled estimate is within 10 % on all 20 seeds, and the truncated mean is high on average. A second test at 0.02 mol checks that censored windows really occur and that the truncated mean is high; it does not assert the pooled 10 %. The other rows are reported, not asserted.
+
+**Plainly: the 10 % target holds only when the thermal sensors are calibrated to about σ_leaf ≤ 0.5 °C (and σ_air ≤ 0.25 °C) for the window means.** At the current placeholder (1.0 °C) it fails on some seeds even at 0.05 mol m⁻² s⁻¹, and at 0.02 mol it can be about 20 % off.
+
+Note: at 0.05 mol and σ_leaf 0.5 °C almost no window is censored, so the +3.9 % of the truncated mean there comes from the curve of 1/r_s, not from dropped windows. The real truncation effect shows up in the rows with censored windows (+20 % and +72 %).
+
+**Methods sentence (draft).** Where several windows on the same leaf or plant shared conditions, g_s was estimated by averaging latent heat flux (including non-positive values from censored windows) and VPD across windows and solving Eq. 8 once, which avoids the upward bias of averaging only uncensored g_s values.
+
+**Limitations of the pooled estimate.**
+1. **Valid only for windows that share one true g_s and one set of conditions** (replicate windows on one leaf or plant; register A37). Pooling windows with different light, VPD or r_b mixes different leaves' physics.
+2. **It removes random window-to-window noise only.** A calibration offset that is the same in every window (for example a thermal camera reading 0.5 °C high all session) does not average out; pooling does nothing for it.
+3. **Errors were simulated as independent normal errors on window means.** Real errors may be correlated in time.
+4. It does not give an interval. Bootstrapping over windows would; not done yet.
+
 ## Methods paragraph (draft)
 Measurement uncertainty was propagated by Monte Carlo simulation (2000 draws per window, fixed seed). Leaf and air temperature errors were drawn as correlated normal deviates (σ = [x] and [y] °C, correlation [ρ], from calibration against a common reference thermometer); relative humidity errors were normal (σ = [z] %) with draws limited to 0–100 %; irradiance and boundary-layer resistance errors were lognormal (log-SD [a] and [b]). Each draw was re-solved with the full energy-balance model. Draws with non-positive latent heat flux were assigned g_s = 0 and draws with non-positive stomatal resistance were assigned the upper limit of the measurable range (2.0 mol m⁻² s⁻¹), so that intervals include closed- and fully-open-stomata outcomes; draws with non-positive VPD were excluded and their fraction reported. Intervals are the 2.5th–97.5th percentiles. A window was labelled resolved when ≥ 90 % of draws gave a positive, finite g_s and the relative 95 % interval width was below 1.0. The per-window detection limit was the smallest true g_s, on a logarithmic grid, meeting that criterion under the window's conditions. Resolved status was reported, not used to exclude data. Software: Python 3.13, NumPy, SciPy [versions].
 

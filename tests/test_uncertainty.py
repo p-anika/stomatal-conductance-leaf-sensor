@@ -1,4 +1,8 @@
-"""Tests for processing/uncertainty.py (T1.5; T1.7 item 3).
+"""Tests for processing/uncertainty.py (T1.5; T1.7 items 3 and 5).
+
+T1.7 coverage: item 3 (+-0.5 C sensitivity) is test_half_degree_sensitivity; the pooled
+flux-space estimate used by the truncation test (item 5, tests/test_physics_roundtrip.py)
+is unit-tested at the end of this file (owner decision A, 2026-11-08).
 
 Owner decisions tested here (2026-11-08): lognormal light and r_b errors; humidity draws
 clipped to 0-100; VPD <= 0 draws excluded from percentiles but counted as not resolved;
@@ -27,6 +31,7 @@ from processing.uncertainty import (
     get_sigmas,
     gs_draws,
     gs_uncertainty,
+    pooled_gs_mol,
     solve_core,
 )
 
@@ -325,3 +330,82 @@ def test_card_invalid_passthrough(cfg1, cal):
 
 def test_card_same_seed_same_result(cfg1, cal):
     assert card_rbh_uncertainty(card(), cfg1, cal) == card_rbh_uncertainty(card(), cfg1, cal)
+
+
+# ---------- pooled flux-space estimate (T1.7 item 5, owner decision A) ----------
+
+def _pool(readings, cfg, cal):
+    return pooled_gs_mol(readings, [solve_gs(x, cfg, cal) for x in readings], cfg)
+
+
+def test_pooled_single_window_equals_solve_gs(cfg1, cal):
+    p = _pool([leaf()], cfg1, cal)
+    ref = solve_gs(leaf(), cfg1, cal)
+    assert p.valid and p.reason == "ok" and p.censor == "none"
+    assert p.g_s_mol == pytest.approx(ref.g_s_mol, rel=1e-12)
+    assert p.r_s == pytest.approx(ref.r_s, rel=1e-12)
+    assert p.n_windows == 1 and p.n_excluded == 0 and p.n_censored_windows == 0
+
+
+def test_pooled_identical_windows_equal_one(cfg1, cal):
+    p = _pool([leaf()] * 5, cfg1, cal)
+    assert p.g_s_mol == pytest.approx(solve_gs(leaf(), cfg1, cal).g_s_mol, rel=1e-12)
+    assert p.n_windows == 5
+
+
+def test_pooled_uses_censored_windows_in_flux_space(cfg1, cal):
+    """Hand check: mean lambdaE and mean VPD over both windows (including the one with
+    lambdaE <= 0), then eq. 8 once with the shared r_bH, pressure and air temperature."""
+    # Second window: E_s 60 W m-2, warm leaf -> lambdaE about -18 W m-2 (censored);
+    # the pooled mean lambdaE stays positive.
+    readings = [leaf(), leaf(leaf_temp_c=27.0, lux=6000.0)]
+    results = [solve_gs(x, cfg1, cal) for x in readings]
+    le = (results[0].latent_wm2 + results[1].latent_wm2) / 2
+    vpd = (results[0].vpd_pa + results[1].vpd_pa) / 2
+    rho_cp = 1.204 * 1005.0
+    gamma = 0.0665 * 995.0
+    r_s = rho_cp * vpd / (gamma * le) - 0.93 * 70.0
+    g_mol = (1.0 / r_s) * 99500.0 / (8.314 * (24.0 + 273.15))
+    p = pooled_gs_mol(readings, results, cfg1)
+    assert results[1].censor == "below_detection"
+    assert p.n_censored_windows == 1
+    assert p.latent_wm2 == pytest.approx(le) and p.vpd_pa == pytest.approx(vpd)
+    assert p.g_s_mol == pytest.approx(g_mol, rel=1e-9)
+
+
+def test_pooled_below_detection_when_mean_latent_nonpositive(cfg1, cal):
+    p = _pool([leaf(leaf_temp_c=27.0, lux=1000.0)] * 3, cfg1, cal)
+    assert p.valid and p.censor == "below_detection"
+    assert p.g_s_mol is None and p.r_s is None and p.latent_wm2 <= 0
+
+
+def test_pooled_above_range(cfg1, cal):
+    p = _pool([leaf(leaf_temp_c=15.0)] * 3, cfg1, cal)
+    assert p.valid and p.censor == "above_range"
+    assert p.g_s_mol is None and p.r_s <= 0
+
+
+def test_pooled_excludes_and_counts_invalid_windows(cfg1, cal):
+    p = _pool([leaf(), leaf(leaf_temp_c=None), leaf(relative_humidity_pct=100.0)], cfg1, cal)
+    assert p.n_windows == 1 and p.n_excluded == 2
+    assert p.g_s_mol == pytest.approx(solve_gs(leaf(), cfg1, cal).g_s_mol, rel=1e-12)
+
+
+def test_pooled_all_invalid_is_invalid(cfg1, cal):
+    p = _pool([leaf(leaf_temp_c=None)], cfg1, cal)
+    assert p.valid is False and p.reason == "missing_input" and p.g_s_mol is None
+    p0 = pooled_gs_mol([], [], cfg1)
+    assert p0.valid is False and p0.n_windows == 0
+
+
+def test_pooled_nonpositive_mean_vpd(cfg1, cal):
+    """Each window has VPD > 0 only if solved; force a pooled VPD <= 0 by hand-made results."""
+    r = solve_gs(leaf(), cfg1, cal)
+    bad = dataclasses.replace(r, vpd_pa=-1.0)
+    p = pooled_gs_mol([leaf()], [bad], cfg1)
+    assert p.valid is False and p.reason == "vpd_nonpositive"
+
+
+def test_pooled_length_mismatch_raises(cfg1, cal):
+    with pytest.raises(ValueError, match="same length"):
+        pooled_gs_mol([leaf()], [], cfg1)
