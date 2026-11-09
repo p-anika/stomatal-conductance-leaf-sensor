@@ -86,6 +86,8 @@ sensors:
   fs3000: {enabled: false, variant: 1005}
   arducam: {enabled: false, working_distance_mm: null, lens_position: null, resolution: [2304, 1296]}
 uncertainty:
+  # Every sigma below is a PRE-CALIBRATION PLACEHOLDER (Appendix B). Measured values go in
+  # calibration.json under the same keys and override these (T1.5, decision_log 2026-11-08).
   sigma_leaf_temp_c: 1.0                # placeholders; replace after thermal calibration
   sigma_air_temp_c: 0.5
   sigma_rh_pct: 3.0
@@ -94,8 +96,16 @@ uncertainty:
   sigma_rb_fraction: 0.2
   sigma_rn_card_fraction: 0.1           # card irradiance mismatch (A16)
   n_draws: 2000
-  max_relative_width: 1.0
+  max_relative_width: 1.0               # (p97.5 - p2.5) / median must be below this to count as resolved
   dl_min_resolved_fraction: 0.9         # detection limit definition (A15)
+  # Added in T1.5 (2026-11-08, see decision_log):
+  rho_leaf_air_temp: 0.0                # correlation of leaf and air temperature errors (shared reference thermometer); 0 = widest intervals
+  g_s_cap_mol: 2.0                      # top of measurable range, mol m-2 s-1; UNVERIFIED. An upper bound at the cap means "not bounded above"
+  dl_grid_min_mol: 0.001                # detection-limit search grid (log spaced) from here up to g_s_cap_mol
+  dl_grid_points: 60
+jones:                                  # Added in T1.6 (2026-11-08); values from spec T1.6
+  min_leaf_wet_diff_c: 0.2              # I_g above_range when T_leaf - T_wet is below this
+  min_dry_wet_diff_c: 1.0               # references_not_bracketing when T_dry - T_wet is below this
 ml:
   min_shapes: 10
   min_improvement: 0.05
