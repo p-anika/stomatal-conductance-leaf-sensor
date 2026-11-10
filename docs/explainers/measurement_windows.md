@@ -19,6 +19,7 @@ So `measurement_windows.py`:
 3. **Tilt.** Use `--incidence-angle` if given, otherwise `incidence_angle_deg` from `session.json`, otherwise no correction. If an angle is given, even 0°, the T3.1 flag `foreshortening_corrected` is set.
 4. **Photo time.** The time of the `sensor_log.csv` row whose `image_file` column names the photo. The corrected clock time (`timestamp_corrected_iso`) is used when it exists, otherwise `timestamp_iso`. A photo no log row names (for example a phone photo) gets a blank time. Its features are still measured, but it can't be paired with a window.
 5. **Measure** with `segment_and_measure` (T3.1) and save the overlay as `overlays/<name>_overlay.png`.
+   Overlays are regenerable: rerun the command to remake them, so git ignores them (`data/processed/*/overlays/`). Copy any overlay you want as a figure for the paper by hand to `docs/figures/`.
 6. **Write** `photo_features.csv` with these columns: timestamp, image_file, the 12 geometry columns, ok, reason, flags, mm_per_pixel, incidence_angle_deg. `processing.data_io.load_photo_features` reads it back and checks the columns.
 
 ### build_windows (T3.4)

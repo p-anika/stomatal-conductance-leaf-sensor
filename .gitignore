@@ -10,6 +10,8 @@ __pycache__/
 # Raw images and thermal frames are too big for git; back them up separately (spec Section 6)
 data/raw/*/images/
 data/raw/*/thermal_frames.f32
+# Segmentation overlays are regenerable from the raw photos (T3.5, owner decision 2026-11-09)
+data/processed/*/overlays/
 
 # Sample photos for leaf_segmentation tests are not committed (owner decision 2026-11-09, T3.1)
 data/samples/*
