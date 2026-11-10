@@ -160,3 +160,31 @@ ml:
   min_improvement: 0.05
   n_bootstrap: 200
   features: [d_min_mm, d_eq_mm, aspect_ratio, eccentricity, solidity, circularity, edge_density, incidence_angle_deg, wind_ms]
+synthetic:                              # Added in T4.2 (2026-11-09). Used ONLY by ml/synthetic_data.py.
+  # Every value here is invented for testing code. None is a measurement or a calibration.
+  k_wm2_per_lux: 0.01                   # goes into a synthetic calibration dict, never into light_sources
+  a_s_card: 0.95                        # synthetic card absorptivity (matches card.a_s_card_placeholder)
+  train_seed: 0
+  test_seed: 1                          # held-out set (owner 2026-11-09)
+  n_shapes: 20
+  # Hidden correction f = 1 + a (1 - solidity) + b (aspect_ratio - 1) + c edge_density + N(0, noise_sd)
+  correction_a: 0.8
+  correction_b: 0.15
+  correction_c: 2.0
+  correction_noise_sd: 0.05
+  solidity_range: [0.7, 1.0]
+  aspect_ratio_range: [1.0, 3.0]
+  edge_density_range: [0.0, 0.1]
+  d_min_mm_range: [20.0, 60.0]
+  card_thickness_mm: 1.0
+  # Per-sample random noise (one 5 s row); NOT the per-window uncertainty sigmas.
+  noise: {leaf_temp_c: 0.1, card_temp_c: 0.1, air_temp_c: 0.05, humidity_pct: 0.5,
+          pressure_hpa: 0.1, lux_fraction: 0.01, wind_ms: 0.02}
+  # true: draw one offset per session from the uncertainty sigmas (thermal offset shared by
+  # leaf and card, one camera); recorded in the truth table. Off by default.
+  session_bias: false
+  conditions: {air_temp_c: 24.0, humidity_pct: 50.0, pressure_hpa: 995.0, irradiance_wm2: 120.0,
+               wind_ms: 0.5, duration_min: 15.0, acclimation_minutes: 40.0}
+  start_iso: "2026-11-09T10:00:00+00:00"
+  roi_n_px: 20                          # pixel counts written to leaf_n_px / card_n_px
+  root_bracket_c: [-20.0, 40.0]         # search T_air + this range (deg C) for the energy-balance root
