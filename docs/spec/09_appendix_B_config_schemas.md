@@ -127,6 +127,12 @@ ml:
   min_improvement: 0.05
   n_bootstrap: 200
   features: [d_min_mm, d_eq_mm, aspect_ratio, eccentricity, solidity, circularity, edge_density, incidence_angle_deg, wind_ms]
+  max_suspect_fraction: 0.02            # T4.3; warn when more gated card windows have r_bH <= 0 (placeholder)
+  ridge_alpha: 1.0                      # T4.4 model settings: PLACEHOLDERS, untuned
+  forest_n_estimators: 100
+  forest_max_depth: 3
+  random_state: 0
+  interval_level: 0.95                  # f_lo / f_hi coverage (T4.5)
 synthetic:                              # T4.2; used only by ml/synthetic_data.py. EVERY VALUE IS INVENTED (not a measurement or calibration)
   k_wm2_per_lux: 0.01                   # only in a returned synthetic calibration dict; light_sources.led_lamp k stays null
   a_s_card: 0.95
@@ -150,6 +156,12 @@ synthetic:                              # T4.2; used only by ml/synthetic_data.p
   start_iso: "2026-11-09T10:00:00+00:00"
   roi_n_px: 20
   root_bracket_c: [-20.0, 40.0]         # root-finder search range around air temperature, deg C
+  delta_t_sweep:                        # ml/delta_t_sweep.py (T4.3 follow-up); INVENTED settings
+    irradiance_wm2: [60.0, 100.0, 200.0, 400.0, 800.0]   # incident on the card
+    wind_ms: [0.8, 2.0]
+    offset_scales: [0.0, 0.5, 1.0]      # x the uncertainty sigmas; 0 = per-sample noise only
+    repeats: 10
+    duration_min: 6.0
 ```
 
 **calibration.json schema (decided in Session 3).** One JSON object; every key is optional. It mirrors the section and key names of config.yaml, and a non-null calibration value overrides the config value with the same section and key. Only calibration.json counts as calibrated.
