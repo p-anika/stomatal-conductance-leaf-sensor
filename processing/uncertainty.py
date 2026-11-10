@@ -245,9 +245,51 @@ def forward_leaf_temp(reading: LeafReading, g_s_mol_true: float, cfg: dict[str, 
         return float(out["latent"][0] - rho_cp / gamma * vpd / r_total)
 
     lo, hi = t_a - _FORWARD_SPAN_C, t_a + _FORWARD_SPAN_C
-    if residual(lo) * residual(hi) > 0:
+    try:
+        if not residual(lo) * residual(hi) < 0:      # same sign, or nan: no bracketed root
+            return None
+        return brentq(residual, lo, hi, xtol=1e-10)
+    except (RuntimeError, ValueError, FloatingPointError, ZeroDivisionError):
+        # A failed search is counted (dl_grid_no_root), never allowed to stop the run.
         return None
-    return brentq(residual, lo, hi, xtol=1e-10)
+
+
+@dataclass(frozen=True)
+class Resolution:
+    """What the Monte Carlo makes of one TRUE g_s under one window's conditions (T5.4).
+
+    leaf_temp_c: forward leaf temperature [deg C] the true g_s would give.
+    g_s_mol_lo / median / hi: 2.5 / 50 / 97.5 percentiles of the estimated g_s [mol m-2 s-1]
+    (every draw used; below_detection draws at 0, above_range draws at the cap).
+    frac_ok: fraction of draws with lambdaE > 0 and r_s > 0. resolved: the A33 three-part rule.
+    """
+    g_s_mol_true: float
+    leaf_temp_c: float
+    g_s_mol_lo: float
+    g_s_mol_median: float
+    g_s_mol_hi: float
+    frac_ok: float
+    relative_width: float
+    resolved: bool
+
+
+def dl_grid(cfg: dict[str, Any]) -> np.ndarray:
+    """Log-spaced true g_s grid [mol m-2 s-1]: dl_grid_min_mol to g_s_cap_mol, dl_grid_points."""
+    unc = cfg["uncertainty"]
+    return np.geomspace(unc["dl_grid_min_mol"], unc["g_s_cap_mol"], int(unc["dl_grid_points"]))
+
+
+def resolution_at(reading: LeafReading, g_s_mol_true: float, cfg: dict[str, Any],
+                  cal: dict[str, Any], s: Sigmas, n: int, seed: int) -> Resolution | None:
+    """Forward leaf temperature for a true g_s, then the same draws as gs_uncertainty.
+    None when no forward leaf temperature exists (root search failed)."""
+    t_leaf = forward_leaf_temp(reading, float(g_s_mol_true), cfg, cal)
+    if t_leaf is None:
+        return None
+    light, e_s = _light_inputs(reading, cfg, cal)
+    sm = _summarise(_draw_at(t_leaf, reading, e_s, light.a_s_leaf, s, n, seed, cfg), cfg)
+    return Resolution(float(g_s_mol_true), float(t_leaf), sm.lo, sm.median, sm.hi, sm.frac_ok,
+                      sm.rel_width, sm.resolved)
 
 
 def detection_limit_mol(reading: LeafReading, cfg: dict[str, Any], cal: dict[str, Any],
@@ -256,20 +298,20 @@ def detection_limit_mol(reading: LeafReading, cfg: dict[str, Any], cal: dict[str
     number of grid points where no forward leaf temperature was found).
 
     Roots are searched at every grid point, even after the limit is found, so the
-    count always describes the whole grid.
+    count always describes the whole grid. Uses resolution_at, like the T5.4 sweep.
     """
-    unc = cfg["uncertainty"]
-    light, e_s = _light_inputs(reading, cfg, cal)
-    grid = np.geomspace(unc["dl_grid_min_mol"], unc["g_s_cap_mol"], int(unc["dl_grid_points"]))
     dl: float | None = None
     no_root = 0
-    for g_true in grid:
-        t_leaf = forward_leaf_temp(reading, float(g_true), cfg, cal)
-        if t_leaf is None:
-            no_root += 1
+    for g_true in dl_grid(cfg):
+        if dl is not None:
+            # Only the root search is needed now (to keep the no-root count complete).
+            if forward_leaf_temp(reading, float(g_true), cfg, cal) is None:
+                no_root += 1
             continue
-        if dl is None and _summarise(
-                _draw_at(t_leaf, reading, e_s, light.a_s_leaf, s, n, seed, cfg), cfg).resolved:
+        r = resolution_at(reading, float(g_true), cfg, cal, s, n, seed)
+        if r is None:
+            no_root += 1
+        elif r.resolved:
             dl = float(g_true)
     return dl, no_root
 
