@@ -73,6 +73,33 @@ acquisition:
   photo_interval_sec: 60
   roi_source: manual                    # manual or rgb_mask
   min_roi_pixels: 6
+  # Added in T3.2 (2026-11-09, see decision_log):
+  roi_mad_k: 3.0                        # trim ROI pixels more than k x 1.4826 x MAD from the median
+  min_pixel_coverage: 1.0               # keep a thermal pixel only if this fraction lies inside the leaf mask
+  warp_supersample: 4                   # sample points per thermal pixel side when warping an RGB mask
+qc:                                     # Added in T3.3 (2026-11-09); ranges from spec T3.3
+  ranges:                               # [low, high], inclusive; null = no limit
+    air_temp_c: [-10.0, 50.0]
+    humidity_pct: [0.0, 100.0]
+    pressure_hpa: [900.0, 1100.0]
+    lux: [0.0, null]
+  thermal_range_c: [-10.0, 80.0]        # applied to every column in thermal_columns
+  thermal_columns: [thermal_min_c, thermal_max_c, thermal_mean_c, leaf_temp_c, leaf_temp_median_c,
+                    card_temp_c, wet_ref_temp_c]
+  # Spike checks only on environment sensors and whole-frame thermal summaries, never on
+  # leaf, card or wet-reference temperatures (would select data on the measured result).
+  spike_columns: [air_temp_c, humidity_pct, pressure_hpa, lux, thermal_min_c, thermal_max_c,
+                  thermal_mean_c]
+  hampel_window: 7                      # rows, centred, odd; shrinks at the ends of the file
+  hampel_n_sigma: 3.0
+  mad_to_sigma: 1.4826                  # 1 / Phi^-1(0.75): MAD -> sigma for normal data (derived)
+  # Minimum spike size: |x - median| must also exceed this. PLACEHOLDERS (owner 2026-11-09).
+  spike_min_abs: {air_temp_c: 0.5, humidity_pct: 3.0, pressure_hpa: 1.0,
+                  thermal_min_c: 1.0, thermal_max_c: 1.0, thermal_mean_c: 1.0}
+  spike_min_rel: {lux: 0.2}             # fraction of the window median
+  overflow_columns: [tsl_full_spectrum, tsl_infrared]
+  overflow_count: 65535                 # 16-bit full scale; OPEN: use adafruit_tsl2591's own limit (check on Pi)
+  timestamp_columns: [timestamp_iso, timestamp]   # first one present is checked for duplicates
 clock:
   min_valid_date: "2026-10-01"           # refuse to start if the system time is earlier (B14)
   allow_unsynced: false
@@ -88,6 +115,9 @@ windows:
 sensors:
   fs3000: {enabled: false, variant: 1005}
   arducam: {enabled: false, working_distance_mm: null, lens_position: null, resolution: [2304, 1296]}
+  # Added in T3.2 (2026-11-09): field of view from Adafruit's 55 x 35 deg product listing;
+  # confirm by imaging a known-size warm object at T7.4.
+  mlx90640: {hfov_deg: 55, vfov_deg: 35}
 uncertainty:
   # Every sigma below is a PRE-CALIBRATION PLACEHOLDER (Appendix B). Measured values go in
   # calibration.json under the same keys and override these (T1.5, decision_log 2026-11-08).
