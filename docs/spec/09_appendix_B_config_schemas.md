@@ -92,7 +92,8 @@ windows:
   min_acclimation_minutes: 30
   card_match_minutes: 10
   max_photo_gap_sec: 120                # photo-to-window join (B15)
-  leaf_moved_cv: 0.05
+  leaf_moved_range_frac: 0.05           # leaf_moved when (max - min) / median of d_min over the session's photos exceeds this (T3.4)
+  acclimation_reset_label: lamp_on      # events.csv label that restarts the light-acclimation clock (T3.4)
 segmentation:                           # T3.1; ALL PLACEHOLDERS, tune on Arducam photos (BLOCKED-CAM)
   modes: [leaf, card]                   # leaf = excess green (2G - R - B); card = dark object on light background
   blur_ksize_px: 5                      # Gaussian blur (odd) before Otsu
