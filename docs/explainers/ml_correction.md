@@ -94,6 +94,72 @@ Synthetic set: 20 shapes × 3 winds (0.3, 0.8, 1.5 m s⁻¹), 6-minute sessions.
    - So rejecting suspect rows adds a large upward bias when the card's ΔT is small compared with the calibration error. Even keeping them leaves a bias, because the calibration offsets themselves don't average away over a few dozen sessions. A smaller part comes from curvature: r_bH = ρc_p·ΔT / Rn(ΔT) is a curved function of the measured ΔT, so noise pushes its average up (A42).
    - **Lesson for real data:** run cards with a temperature rise of several °C (strong light, modest wind), and fix the thermal calibration first.
 
+## How big must the card's ΔT be? (`ml/delta_t_sweep.py`)
+
+> **SYNTHETIC, WITH PLACEHOLDER CALIBRATION SIGMAS.** This table proves only that the code works, and shows *how* the error behaves. The numbers depend on the invented `synthetic` settings and on the placeholder `uncertainty` sigmas (thermal 1.0 °C, air 0.5 °C, RH 3 %, lux 15 %). They must be redone with the real values after the thermal and light calibrations (T7.5). They say nothing about real cards.
+
+**What it does.** `python -m ml.delta_t_sweep` makes the cards warm up by different amounts by changing the lamp strength:
+- 5 lamp levels × 2 winds (0.8 and 2.0 m s⁻¹);
+- 3 sizes of calibration offset: 0 (per-sample noise only), half, and full placeholder sigmas;
+- each of the 20 synthetic cards simulated 10 times per setting, using the same random draws at every setting so only ΔT changes;
+- every session sent through the real `build_training_set`.
+
+**What the table shows:**
+- **E:** lamp light reaching the card (incident) and the part it absorbs (× a_s,card 0.95). The absorbed value is what the 40 W m⁻² gate tests, using the measured lux.
+- **True ΔT:** card minus air temperature, from the planted truth.
+- **Sessions passing gate.**
+- **r_bH ≤ 0 fraction:** among windows that passed the gate.
+- **Bias:** mean of f_measured / f_true − 1 over sessions, ± its standard error, for three row sets:
+  - *kept*: the real pipeline, with the gate on and r_bH ≤ 0 rejected;
+  - *gate on, r_bH ≤ 0 kept*: no truncation;
+  - *gate off, all kept*: no selection except steady state.
+
+  The gate itself was not changed. The sweep runs on a config copy with the gate at 0, then applies the real 40 W m⁻² test as a filter.
+- **Spread:** the SD of the error between sessions, i.e. how far off one session can be.
+
+| E incident (W m⁻²) | E absorbed (W m⁻²) | wind (m s⁻¹) | offset scale | true ΔT (°C) | sessions passing gate | r_bH ≤ 0 fraction | bias kept (pipeline) | spread kept | bias gate on, r_bH ≤ 0 kept | bias gate off, all kept |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 60 | 57 | 0.8 | 0.0 | 1.37 | 200/200 | 0.0% | +0.1 ± 0.1 % | 1.6 % | +0.1 ± 0.1 % | +0.1 ± 0.1 % |
+| 100 | 95 | 0.8 | 0.0 | 2.24 | 200/200 | 0.0% | +0.0 ± 0.1 % | 1.0 % | +0.0 ± 0.1 % | +0.0 ± 0.1 % |
+| 200 | 190 | 0.8 | 0.0 | 4.37 | 200/200 | 0.0% | +0.0 ± 0.0 % | 0.6 % | +0.0 ± 0.0 % | +0.0 ± 0.0 % |
+| 400 | 380 | 0.8 | 0.0 | 8.46 | 200/200 | 0.0% | +0.0 ± 0.0 % | 0.4 % | +0.0 ± 0.0 % | +0.0 ± 0.0 % |
+| 800 | 760 | 0.8 | 0.0 | 16.25 | 200/200 | 0.0% | +0.0 ± 0.0 % | 0.3 % | +0.0 ± 0.0 % | +0.0 ± 0.0 % |
+| 60 | 57 | 0.8 | 0.5 | 1.37 | 200/200 | 1.5% | +16.0 ± 5.1 % | 72.2 % | +14.2 ± 5.2 % | +14.2 ± 5.2 % |
+| 100 | 95 | 0.8 | 0.5 | 2.24 | 200/200 | 0.0% | +6.4 ± 2.8 % | 39.6 % | +6.4 ± 2.8 % | +6.4 ± 2.8 % |
+| 200 | 190 | 0.8 | 0.5 | 4.37 | 200/200 | 0.0% | +3.1 ± 1.5 % | 21.7 % | +3.1 ± 1.5 % | +3.1 ± 1.5 % |
+| 400 | 380 | 0.8 | 0.5 | 8.46 | 200/200 | 0.0% | +2.1 ± 1.0 % | 14.7 % | +2.1 ± 1.0 % | +2.1 ± 1.0 % |
+| 800 | 760 | 0.8 | 0.5 | 16.25 | 200/200 | 0.0% | +1.7 ± 0.9 % | 12.3 % | +1.7 ± 0.9 % | +1.7 ± 0.9 % |
+| 60 | 57 | 0.8 | 1.0 | 1.37 | 193/200 | 11.0% | +46.4 ± 9.0 % | 118.4 % | -46.3 ± 46.7 % | -34.0 ± 45.5 % |
+| 100 | 95 | 0.8 | 1.0 | 2.24 | 200/200 | 3.2% | +34.2 ± 9.2 % | 128.1 % | +29.7 ± 9.1 % | +29.7 ± 9.1 % |
+| 200 | 190 | 0.8 | 1.0 | 4.37 | 200/200 | 0.0% | +12.0 ± 3.8 % | 53.5 % | +12.0 ± 3.8 % | +12.0 ± 3.8 % |
+| 400 | 380 | 0.8 | 1.0 | 8.46 | 200/200 | 0.0% | +8.1 ± 2.6 % | 36.7 % | +8.1 ± 2.6 % | +8.1 ± 2.6 % |
+| 800 | 760 | 0.8 | 1.0 | 16.25 | 200/200 | 0.0% | +6.9 ± 2.2 % | 31.5 % | +6.9 ± 2.2 % | +6.9 ± 2.2 % |
+| 60 | 57 | 2.0 | 0.0 | 1.02 | 200/200 | 0.0% | +0.1 ± 0.1 % | 2.0 % | +0.1 ± 0.1 % | +0.1 ± 0.1 % |
+| 100 | 95 | 2.0 | 0.0 | 1.68 | 200/200 | 0.0% | +0.0 ± 0.1 % | 1.2 % | +0.0 ± 0.1 % | +0.0 ± 0.1 % |
+| 200 | 190 | 2.0 | 0.0 | 3.30 | 200/200 | 0.0% | +0.0 ± 0.0 % | 0.6 % | +0.0 ± 0.0 % | +0.0 ± 0.0 % |
+| 400 | 380 | 2.0 | 0.0 | 6.45 | 200/200 | 0.0% | +0.0 ± 0.0 % | 0.4 % | +0.0 ± 0.0 % | +0.0 ± 0.0 % |
+| 800 | 760 | 2.0 | 0.0 | 12.54 | 200/200 | 0.0% | +0.0 ± 0.0 % | 0.3 % | +0.0 ± 0.0 % | +0.0 ± 0.0 % |
+| 60 | 57 | 2.0 | 0.5 | 1.02 | 200/200 | 3.9% | +20.9 ± 5.9 % | 81.1 % | +15.2 ± 6.0 % | +15.2 ± 6.0 % |
+| 100 | 95 | 2.0 | 0.5 | 1.68 | 200/200 | 0.0% | +6.8 ± 3.3 % | 46.2 % | +6.8 ± 3.3 % | +6.8 ± 3.3 % |
+| 200 | 190 | 2.0 | 0.5 | 3.30 | 200/200 | 0.0% | +3.1 ± 1.7 % | 24.3 % | +3.1 ± 1.7 % | +3.1 ± 1.7 % |
+| 400 | 380 | 2.0 | 0.5 | 6.45 | 200/200 | 0.0% | +2.0 ± 1.1 % | 15.2 % | +2.0 ± 1.1 % | +2.0 ± 1.1 % |
+| 800 | 760 | 2.0 | 0.5 | 12.54 | 200/200 | 0.0% | +1.6 ± 0.8 % | 11.8 % | +1.6 ± 0.8 % | +1.6 ± 0.8 % |
+| 60 | 57 | 2.0 | 1.0 | 1.02 | 192/200 | 15.0% | +105.1 ± 44.1 % | 562.5 % | -45.1 ± 119.6 % | -34.6 ± 115.5 % |
+| 100 | 95 | 2.0 | 1.0 | 1.68 | 200/200 | 4.7% | +36.6 ± 9.5 % | 131.0 % | +28.8 ± 9.4 % | +28.8 ± 9.4 % |
+| 200 | 190 | 2.0 | 1.0 | 3.30 | 200/200 | 0.0% | +11.4 ± 4.0 % | 56.6 % | +11.4 ± 4.0 % | +11.4 ± 4.0 % |
+| 400 | 380 | 2.0 | 1.0 | 6.45 | 200/200 | 0.0% | +7.2 ± 2.5 % | 35.5 % | +7.2 ± 2.5 % | +7.2 ± 2.5 % |
+| 800 | 760 | 2.0 | 1.0 | 12.54 | 200/200 | 0.0% | +5.9 ± 2.0 % | 28.3 % | +5.9 ± 2.0 % | +5.9 ± 2.0 % |
+
+**How to read it (synthetic):**
+1. **Noise alone does no harm.** At offset scale 0 the bias is ≤ 0.1 % at every ΔT and no r_bH ≤ 0 appears. Truncation and curvature from per-sample noise are negligible here.
+2. **Calibration offsets cause the bias, and a bigger ΔT shrinks it.** With full placeholder offsets at 0.8 m s⁻¹, the pipeline's bias falls from +46 % at ΔT 1.4 °C to +12 % at 4.4 °C and +7 % at 16 °C. The spread between sessions falls from 118 % to 32 %. At 2.0 m s⁻¹ it is worse at low light: +105 % at ΔT 1.0 °C.
+3. **The bias levels off.** It stays around +6–8 % even at 12–16 °C. That remainder comes mostly from the lux (light-calibration) offset: f depends on 1/Rn, and Rn uses the measured light. A bigger ΔT can't fix that. Only a better light calibration (k) can. In a real study k is one value for all sessions, so its error doesn't average away at all: it scales every f.
+4. **Near the gate the estimate breaks down.** At 60 W m⁻² (absorbed 57) with full offsets, 11–15 % of windows have r_bH ≤ 0 and rejecting them adds +46 to +105 %. Keeping them gives means of −34 to −46 % with standard errors of ±45 to ±120 %: dividing by a measured ΔT near zero makes the average meaningless.
+5. **The gate's own selection is small here.** 7–8 of 200 sessions are dropped by the 40 W m⁻² gate at the lowest lamp level (the lux offset made their measured light look too low). The difference between "gate on" and "gate off" (about 12 points) is smaller than its standard error, so it can't be seen in this sweep. At higher lamp levels every session passes.
+6. **With half the offsets,** 200 W m⁻² (ΔT 3.3–4.4 °C) brings the bias to about +3 %, and r_bH ≤ 0 disappears from 100 W m⁻² up.
+
+**Decision (2026-11-09, decision log):** the minimum card ΔT, and so the lamp strength and whether the absorbed-shortwave gate (40 W m⁻²) is high enough, must be chosen from this table *re-run with the real calibration sigmas from T7.5*. The gate itself is unchanged. With the placeholder sigmas, the synthetic table points to a card ΔT of at least about 4 °C (absorbed ≈ 190 W m⁻² at these winds). That is a placeholder conclusion, not a setting.
+
 ## Methods paragraph (draft)
 The boundary-layer correction factor f = r_bH,card / r_bH,flat was estimated from steady-state windows of dry reference cards. Windows were selected only by exogenous conditions: card-temperature steady state, measured wind, camera-measured card geometry, and absorbed shortwave ≥ 40 W m⁻². Windows with a non-positive card r_bH were rejected and counted, and the resulting truncation bias in mean f was reported. Three models predicted f from nine geometric and wind features: a null model (f = 1), ridge regression on standardised features (α = 1), and a random forest (100 trees, depth 3). Models were evaluated by leave-one-shape-out cross-validation, using the RMSE of the implied r_bH. The decision to use a learned model was based on nested leave-one-shape-out cross-validation, in which model selection was repeated within each training fold. A learned model was used only if its nested RMSE was at least 5 % below that of the null model; otherwise f = 1 was used. Prediction intervals combined the spread of 200 shape-level bootstrap refits with the cross-validated residual RMS in quadrature. Software: Python 3.13, scikit-learn 1.9.1, NumPy 2.5.4, pandas 3.1.1. The pipeline was verified on synthetic data with a planted correction and with a null correction; those checks verify the software only.
 
@@ -102,7 +168,7 @@ The boundary-layer correction factor f = r_bH,card / r_bH,flat was estimated fro
 2. **The interval is approximate.** It assumes the same residual spread for every shape and roughly normal errors.
 3. **Cards are not leaves.** Dry cards run warmer than transpiring leaves, so free convection differs (A17). Rows in mixed or free convection carry `baseline_unreliable`.
 4. **Few shapes.** With 10–20 shapes even nested cross-validation is noisy. A 5 % threshold is a minimum, not proof.
-5. **Truncation and calibration bias** can be large when the card's ΔT is small (worked example step 6, A42). Watch the report's suspect fraction and truncation bias.
+5. **Truncation and calibration bias** can be large when the card's ΔT is small (worked example step 6, A42). Watch the report's suspect fraction and truncation bias. The ΔT sweep table shows how this falls with ΔT and levels off at the light-calibration error.
 6. **Extrapolation.** Leaves outside the cards' feature ranges get `outside_training_range`. Their f should not be trusted.
 7. **Model settings** (ridge α, forest size and depth) are untuned placeholders in config `ml`.
 8. **Edge density in the synthetic formula** is not evidence that texture changes r_bH (T4.2 explainer).

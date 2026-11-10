@@ -195,3 +195,10 @@ synthetic:                              # Added in T4.2 (2026-11-09). Used ONLY 
   start_iso: "2026-11-09T10:00:00+00:00"
   roi_n_px: 20                          # pixel counts written to leaf_n_px / card_n_px
   root_bracket_c: [-20.0, 40.0]         # search T_air + this range (deg C) for the energy-balance root
+  # ml/delta_t_sweep.py (added 2026-11-09): bias of mean card f vs card delta T. Invented settings.
+  delta_t_sweep:
+    irradiance_wm2: [60.0, 100.0, 200.0, 400.0, 800.0]   # incident on the card
+    wind_ms: [0.8, 2.0]
+    offset_scales: [0.0, 0.5, 1.0]      # x the uncertainty sigmas; 0 = per-sample noise only
+    repeats: 10                         # sessions per card per setting
+    duration_min: 6.0                   # 4 steady windows per session
