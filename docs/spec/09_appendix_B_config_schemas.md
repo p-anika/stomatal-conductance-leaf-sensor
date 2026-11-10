@@ -93,6 +93,19 @@ windows:
   card_match_minutes: 10
   max_photo_gap_sec: 120                # photo-to-window join (B15)
   leaf_moved_cv: 0.05
+segmentation:                           # T3.1; ALL PLACEHOLDERS, tune on Arducam photos (BLOCKED-CAM)
+  modes: [leaf, card]                   # leaf = excess green (2G - R - B); card = dark object on light background
+  blur_ksize_px: 5                      # Gaussian blur (odd) before Otsu
+  open_kernel_px: 5                     # morphological opening (odd): removes specks
+  close_kernel_px: 9                    # morphological closing (odd): bridges small gaps
+  min_component_px: 200                 # smaller pieces are not counted in n_components
+  min_area_mm2: 100.0                   # plausible area range; outside -> segmentation_failed
+  max_area_mm2: 20000.0
+  canny_low: 50                         # Canny thresholds (grey levels) for edge_density
+  canny_high: 150
+  edge_erode_px: 5                      # erode the mask before counting edges so the outline is not counted
+  max_incidence_angle_deg: 60.0         # larger angles raise an error
+  min_contrast: 30.0                    # mean ExG (leaf) or darkness (card) inside minus outside the mask; below -> segmentation_failed
 sensors:
   fs3000: {enabled: false, variant: 1005}
   arducam: {enabled: false, working_distance_mm: null, lens_position: null, resolution: [2304, 1296]}
