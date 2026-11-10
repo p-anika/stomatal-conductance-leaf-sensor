@@ -58,6 +58,29 @@ acquisition:
   photo_interval_sec: 60
   roi_source: manual                    # manual or rgb_mask
   min_roi_pixels: 6
+  roi_mad_k: 3.0                        # trim ROI pixels more than k x 1.4826 x MAD from the median
+  min_pixel_coverage: 1.0               # keep a thermal pixel only if this fraction lies inside the leaf mask
+  warp_supersample: 4                   # sample points per thermal pixel side when warping the RGB mask to the thermal grid
+qc:
+  ranges:                               # [low, high], inclusive; null = no limit
+    air_temp_c: [-10.0, 50.0]
+    humidity_pct: [0.0, 100.0]
+    pressure_hpa: [900.0, 1100.0]
+    lux: [0.0, null]
+  thermal_range_c: [-10.0, 80.0]        # applied to every column in thermal_columns
+  thermal_columns: [thermal_min_c, thermal_max_c, thermal_mean_c, leaf_temp_c, leaf_temp_median_c,
+                    card_temp_c, wet_ref_temp_c]
+  spike_columns: [air_temp_c, humidity_pct, pressure_hpa, lux, thermal_min_c, thermal_max_c,
+                  thermal_mean_c]       # never leaf, card or wet-reference temperatures
+  hampel_window: 7
+  hampel_n_sigma: 3.0
+  mad_to_sigma: 1.4826                  # 1 / Phi^-1(0.75), derived
+  spike_min_abs: {air_temp_c: 0.5, humidity_pct: 3.0, pressure_hpa: 1.0,
+                  thermal_min_c: 1.0, thermal_max_c: 1.0, thermal_mean_c: 1.0}   # placeholders
+  spike_min_rel: {lux: 0.2}             # fraction of the window median; placeholder
+  overflow_columns: [tsl_full_spectrum, tsl_infrared]
+  overflow_count: 65535                 # until the adafruit_tsl2591 library's own limit is checked on the Pi
+  timestamp_columns: [timestamp_iso, timestamp]
 clock:
   min_valid_date: 2026-10-01            # refuse to start if the system time is earlier (B14)
   allow_unsynced: false
@@ -73,6 +96,7 @@ windows:
 sensors:
   fs3000: {enabled: false, variant: 1005}
   arducam: {enabled: false, working_distance_mm: null, lens_position: null, resolution: [2304, 1296]}
+  mlx90640: {hfov_deg: 55, vfov_deg: 35}   # Adafruit 55 x 35 deg listing; confirm at T7.4
 uncertainty:
   sigma_leaf_temp_c: 1.0                # placeholders; replace after thermal calibration
   sigma_air_temp_c: 0.5
