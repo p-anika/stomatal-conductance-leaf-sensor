@@ -160,6 +160,13 @@ ml:
   min_improvement: 0.05
   n_bootstrap: 200
   features: [d_min_mm, d_eq_mm, aspect_ratio, eccentricity, solidity, circularity, edge_density, incidence_angle_deg, wind_ms]
+  # Added in T4.3-T4.5 (2026-11-09, see decision_log). Model settings are PLACEHOLDERS, not tuned.
+  max_suspect_fraction: 0.02            # warn when more gated card windows than this have r_bH <= 0 (truncation bias)
+  ridge_alpha: 1.0                      # ridge penalty on standardised features
+  forest_n_estimators: 100
+  forest_max_depth: 3                   # shallow: few shapes, so keep the forest simple
+  random_state: 0
+  interval_level: 0.95                  # f_lo / f_hi coverage, assuming normal errors
 synthetic:                              # Added in T4.2 (2026-11-09). Used ONLY by ml/synthetic_data.py.
   # Every value here is invented for testing code. None is a measurement or a calibration.
   k_wm2_per_lux: 0.01                   # goes into a synthetic calibration dict, never into light_sources

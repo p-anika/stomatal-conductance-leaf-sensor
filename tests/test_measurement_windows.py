@@ -212,6 +212,25 @@ def test_attach_directly(cfg):
     assert "d_min_mm" not in w.columns                               # input not modified
 
 
+def test_temp_column_default_unchanged(cfg):
+    log = make_log(0.2)
+    a = build_windows(log, no_events(), {"acclimation_minutes": 40}, cfg)
+    b = build_windows(log, no_events(), {"acclimation_minutes": 40}, cfg, temp_column="leaf_temp_c")
+    pd.testing.assert_frame_equal(a, b)
+    assert "leaf_slope_c_per_min" in a.columns and "leaf_temp_drifting" in flags_of(a.iloc[5])
+
+
+def test_temp_column_card(cfg):
+    log = make_log(0.0).rename(columns={"leaf_temp_c": "card_temp_c"})
+    log["card_temp_c"] += 0.2 * np.arange(N_ROWS) * DT_S / 60.0      # card drifting
+    w_leaf = build_windows(log, no_events(), {"acclimation_minutes": 40}, cfg)
+    assert (w_leaf["reason"] == "missing_input").all()                  # no leaf temperature
+    w = build_windows(log, no_events(), {"acclimation_minutes": 40}, cfg, temp_column="card_temp_c")
+    assert "card_slope_c_per_min" in w.columns
+    assert w["card_slope_c_per_min"].iloc[5] == pytest.approx(0.2, abs=0.01)
+    assert w["reason"].iloc[5] == "not_steady_state" and "card_temp_drifting" in flags_of(w.iloc[5])
+
+
 def test_missing_timestamp_column_raises(cfg):
     log = make_log().drop(columns=["timestamp_iso", "timestamp_corrected_iso"])
     with pytest.raises(KeyError, match="timestamp"):

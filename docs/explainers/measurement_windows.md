@@ -49,6 +49,7 @@ A window is **steady** only if all three are true:
 - **Slope:** take the clean rows from the **3 minutes ending at the window's end**, which is longer than the window itself. Fit the straight line *T = m·t + c* by least squares (`np.polyfit`) with t in minutes. The slope *m* is in °C min⁻¹. Why 3 minutes and not 60 s: a longer stretch makes the slope much less noisy (see "Why").
 - **Acclimation time:** the minutes you typed in at session start (`acclimation_minutes`), plus the minutes since the first log row. If `events.csv` has a row labelled `lamp_on` (setting `acclimation_reset_label`) at or before the window's end, the clock instead restarts at the latest such event, because new light means the leaf has to acclimate again.
 - **Flags explaining a failure:** `leaf_temp_drifting`, `acclimation_too_short`, `stability_window_incomplete`.
+- **Card windows (T4.3):** `build_windows(..., temp_column="card_temp_c")` applies the same rule to the card temperature, giving `card_slope_c_per_min` and the flag `card_temp_drifting`. The default (leaf) behaviour is unchanged.
 
 ### Photo-to-window pairing (B15)
 `attach_photo_features(windows, photo_features, max_gap_sec, leaf_moved_range_frac)`

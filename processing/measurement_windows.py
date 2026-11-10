@@ -22,7 +22,8 @@ Photo pairing (attach_photo_features): ok photos inside the window -> median of 
 One reason per window, first that applies: missing_input (fewer than min_samples unflagged rows
 or no leaf temperature), not_steady_state, no_photo_in_window, else ok. Every other problem is
 also written to flags (";"-joined), so nothing is hidden. Detail flags: stability_window_incomplete,
-leaf_temp_drifting, acclimation_too_short, leaf_moved.
+leaf_temp_drifting, acclimation_too_short, leaf_moved. With temp_column="card_temp_c" (T4.3) the
+steady-state test uses the card temperature instead (card_slope_c_per_min, card_temp_drifting).
 """
 from __future__ import annotations
 
@@ -97,10 +98,17 @@ def _resolve(problems: list[str], flags: list[str]) -> tuple[str, str]:
 
 
 def build_windows(sensor_df: pd.DataFrame, events_df: pd.DataFrame | None, meta: Any,
-                  cfg: dict[str, Any], photo_features: pd.DataFrame | None = None) -> pd.DataFrame:
+                  cfg: dict[str, Any], photo_features: pd.DataFrame | None = None,
+                  temp_column: str = LEAF_COLUMN) -> pd.DataFrame:
     """One row per window (rules in the module docstring). meta: session metadata (mapping or
     object) with acclimation_minutes. photo_features: optional, from load_photo_features; when
-    given, attach_photo_features is applied with the windows settings in cfg."""
+    given, attach_photo_features is applied with the windows settings in cfg.
+    temp_column: the surface temperature that must be present and steady (default leaf_temp_c;
+    card_temp_c for card training windows, T4.3). Its name sets the slope column and drift flag:
+    leaf_temp_c -> leaf_slope_c_per_min, leaf_temp_drifting; card_temp_c -> card_slope_c_per_min,
+    card_temp_drifting."""
+    surface = temp_column.split("_temp")[0]
+    slope_col, drift_flag = f"{surface}_slope_c_per_min", f"{surface}_temp_drifting"
     w_cfg = cfg["windows"]
     window_s = float(w_cfg["window_sec"])
     min_samples = int(w_cfg["min_samples"])
@@ -129,7 +137,7 @@ def build_windows(sensor_df: pd.DataFrame, events_df: pd.DataFrame | None, meta:
         ev = events_df[events_df["label"].astype(str).str.strip() == reset_label]
         resets = _parse_times(ev["timestamp_iso"]).dropna().sort_values()
 
-    leaf = df[LEAF_COLUMN].to_numpy(float) if LEAF_COLUMN in df.columns else np.full(len(df), np.nan)
+    leaf = df[temp_column].to_numpy(float) if temp_column in df.columns else np.full(len(df), np.nan)
     clean_np = clean.to_numpy()
     rows: list[dict[str, Any]] = []
     for k in range(int(window_idx.max()) + 1):
@@ -163,15 +171,14 @@ def build_windows(sensor_df: pd.DataFrame, events_df: pd.DataFrame | None, meta:
             flags.append("stability_window_incomplete")
         drifting = not (math.isfinite(slope) and abs(slope) < slope_max)
         if complete and drifting:
-            flags.append("leaf_temp_drifting")
+            flags.append(drift_flag)
         if acclimation < acc_min:
             flags.append("acclimation_too_short")
         steady = complete and not drifting and acclimation >= acc_min
         if not steady:
             problems.append("not_steady_state")
         reason, flag_text = _resolve(problems, flags)
-        row.update(leaf_slope_c_per_min=slope, acclimation_minutes=acclimation,
-                   steady_state=steady, valid=reason == "ok", reason=reason, flags=flag_text)
+        row.update({slope_col: slope}, acclimation_minutes=acclimation, steady_state=steady, valid=reason == "ok", reason=reason, flags=flag_text)
         rows.append(row)
 
     windows = pd.DataFrame(rows)
