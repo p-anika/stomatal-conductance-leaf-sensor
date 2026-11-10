@@ -127,6 +127,29 @@ ml:
   min_improvement: 0.05
   n_bootstrap: 200
   features: [d_min_mm, d_eq_mm, aspect_ratio, eccentricity, solidity, circularity, edge_density, incidence_angle_deg, wind_ms]
+synthetic:                              # T4.2; used only by ml/synthetic_data.py. EVERY VALUE IS INVENTED (not a measurement or calibration)
+  k_wm2_per_lux: 0.01                   # only in a returned synthetic calibration dict; light_sources.led_lamp k stays null
+  a_s_card: 0.95
+  train_seed: 0
+  test_seed: 1                          # held-out set
+  n_shapes: 20
+  correction_a: 0.8                     # f = 1 + a (1 - solidity) + b (aspect_ratio - 1) + c edge_density + N(0, noise_sd)
+  correction_b: 0.15
+  correction_c: 2.0
+  correction_noise_sd: 0.05
+  solidity_range: [0.7, 1.0]
+  aspect_ratio_range: [1.0, 3.0]
+  edge_density_range: [0.0, 0.1]
+  d_min_mm_range: [20.0, 60.0]
+  card_thickness_mm: 1.0
+  noise: {leaf_temp_c: 0.1, card_temp_c: 0.1, air_temp_c: 0.05, humidity_pct: 0.5,
+          pressure_hpa: 0.1, lux_fraction: 0.01, wind_ms: 0.02}   # per sample, not the uncertainty sigmas
+  session_bias: false                   # true: one offset per session from the uncertainty sigmas; thermal offset shared by leaf and card
+  conditions: {air_temp_c: 24.0, humidity_pct: 50.0, pressure_hpa: 995.0, irradiance_wm2: 120.0,
+               wind_ms: 0.5, duration_min: 15.0, acclimation_minutes: 40.0}
+  start_iso: "2026-11-09T10:00:00+00:00"
+  roi_n_px: 20
+  root_bracket_c: [-20.0, 40.0]         # root-finder search range around air temperature, deg C
 ```
 
 **calibration.json schema (decided in Session 3).** One JSON object; every key is optional. It mirrors the section and key names of config.yaml, and a non-null calibration value overrides the config value with the same section and key. Only calibration.json counts as calibrated.
