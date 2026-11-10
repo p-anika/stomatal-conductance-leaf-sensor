@@ -1,4 +1,4 @@
-"""Readers for project data files (T2.2: reference-card manifest).
+"""Readers for project data files (T2.2: reference-card manifest; T3.5: photo_features.csv).
 
 data/reference_cards.csv columns (spec Appendix B). The 11 columns named in T2.2 must be in
 the header; the 8 geometry columns may be left out until photos are measured (owner
@@ -14,6 +14,8 @@ import csv
 import math
 from dataclasses import dataclass
 from pathlib import Path
+
+import pandas as pd
 
 CARD_REQUIRED_COLUMNS = ("card_id", "shape_group", "source", "material", "thickness_mm",
                          "coating", "a_s_card", "emissivity", "area_mm2", "photo_path", "notes")
@@ -132,3 +134,46 @@ def load_reference_cards(path: str | Path) -> dict[str, ReferenceCard]:
                 geometry_source=values["geometry_source"] or None,
                 photo_path=values["photo_path"] or None, notes=values["notes"], **nums)
     return cards
+
+
+# ---------------------------------------------------------------- photo_features.csv (T3.5)
+
+# Geometry columns written by processing/extract_photo_features.py (one per T3.1 feature).
+PHOTO_GEOMETRY_COLUMNS = ("area_mm2", "area_projected_mm2", "perimeter_mm", "d_min_mm", "d_max_mm",
+                          "d_eq_mm", "aspect_ratio", "eccentricity", "solidity", "circularity",
+                          "edge_density", "n_components")
+PHOTO_REQUIRED_COLUMNS = ("timestamp", "image_file") + PHOTO_GEOMETRY_COLUMNS + ("ok", "reason")
+_OK_TEXT = {"true": True, "false": False}
+
+
+class PhotoFeaturesError(ValueError):
+    """photo_features.csv is malformed (missing column, unreadable ok or timestamp)."""
+
+
+def load_photo_features(path: str | Path) -> pd.DataFrame:
+    """Read data/processed/<session>/photo_features.csv.
+
+    Returns a DataFrame with timestamp as timezone-aware UTC (NaT where blank: photo not in the
+    sensor log), ok as bool, geometry columns as float (NaN where the photo failed).
+    """
+    path = Path(path)
+    df = pd.read_csv(path, dtype=str, keep_default_na=False)
+    missing = [c for c in PHOTO_REQUIRED_COLUMNS if c not in df.columns]
+    if missing:
+        raise PhotoFeaturesError(f"{path}: missing column(s) {missing}")
+    ok = df["ok"].str.strip().str.lower().map(_OK_TEXT)
+    if ok.isna().any():
+        bad = df.loc[ok.isna(), "ok"].tolist()
+        raise PhotoFeaturesError(f"{path}: column ok must be true or false, got {bad}")
+    df["ok"] = ok.astype(bool)
+    try:
+        df["timestamp"] = pd.to_datetime(df["timestamp"].replace("", None), utc=True, format="ISO8601")
+    except (ValueError, TypeError) as e:
+        raise PhotoFeaturesError(f"{path}: unreadable timestamp ({e})") from e
+    for col in PHOTO_GEOMETRY_COLUMNS + ("mm_per_pixel", "incidence_angle_deg"):
+        if col in df.columns:
+            num = pd.to_numeric(df[col].replace("", None), errors="coerce")
+            if (num.isna() & (df[col] != "")).any():
+                raise PhotoFeaturesError(f"{path}: column {col} has a value that is not a number")
+            df[col] = num.astype(float)
+    return df
