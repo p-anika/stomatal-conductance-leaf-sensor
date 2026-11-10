@@ -341,6 +341,60 @@ def test_predict_rbh(saved_model, sets, cfg):
     assert not nw.valid and nw.reason == "no_wind"
 
 
+@pytest.mark.parametrize("bad_wind", [float("nan"), None, float("inf"), "", "calm"])
+def test_predict_rbh_refuses_without_wind(saved_model, sets, cfg, bad_wind):
+    """T4.5: no wind -> reason no_wind and no r_bH, even if the features dict holds a wind value."""
+    f = feats_of(sets, wind=0.8)                     # features carry a wind; the argument is missing
+    p = predict_rbh(f, wind_ms=bad_wind, delta_t_c=-1.0, air_temp_c=24.0, cfg=cfg, model=saved_model)
+    assert not p.valid and p.reason == "no_wind"
+    assert p.r_bh is None and p.r_bh_lo is None and p.r_bh_hi is None and p.r_bh_flat is None
+    assert p.f_hat is None
+
+
+# ---------------------------------------------------------------- T4.2 outputs in this pipeline file
+
+def test_synthetic_card_sets_pass_real_checks(sets, tmp_path, cfg):
+    """T4.2: train, held-out and null card sets load through the real manifest loader, and a
+    synthetic card session loads through the real session loader."""
+    for name, (table, truth) in sets.items():
+        path = write_reference_cards(table, tmp_path / f"{name}.csv")
+        assert set(load_reference_cards(path)) == set(table["card_id"])
+        assert "f_true" not in table.columns and len(truth) == len(table)
+    table, truth = sets["train"]
+    sim = simulate_card_session(table.iloc[0], truth.iloc[0], cfg=cfg, seed=0,
+                                conditions={"duration_min": DURATION_MIN})
+    write_session(sim, tmp_path)
+    s = load_session(sim.session_id, tmp_path / "data" / "raw")
+    assert s.synthetic and s.metadata["card_id"] == table.iloc[0]["card_id"]
+
+
+# ---------------------------------------------------------------- every CV split, outer and inner
+
+def test_no_cv_split_mixes_shape_groups(train_ts, cfg, monkeypatch):
+    """T4.6: record every split train_correction_model makes (plain LOGO, nested outer and nested
+    inner) and check that no shape_group is ever in both the training and the test part."""
+    import ml.train_correction_model as tcm
+    real = tcm.logo_splits
+    seen: list[tuple[set, set]] = []
+
+    def spy(df):
+        groups = df["shape_group"].to_numpy()
+        for tr, te in real(df):
+            seen.append((set(groups[tr]), set(groups[te])))
+            yield tr, te
+
+    monkeypatch.setattr(tcm, "logo_splits", spy)
+    shapes = sorted(train_ts.kept["shape_group"].unique())[:5]          # small: speed only
+    small = train_ts.kept[train_ts.kept["shape_group"].isin(shapes)]
+    tcm.train_correction_model(small, cfg)
+    n = len(shapes)
+    # plain LOGO for 3 candidates (n each) + nested: n outer splits, each with 2 inner models x (n - 1)
+    assert len(seen) == 3 * n + n + n * 2 * (n - 1)
+    for train_groups, test_groups in seen:
+        assert len(test_groups) == 1
+        assert train_groups.isdisjoint(test_groups)
+
+
 def test_model_reloads_and_predicts_same(trained, tmp_path, sets):
     save_model(trained, tmp_path)
     a = predict_f(feats_of(sets, 2), load_model(tmp_path / "correction_model.joblib"))
