@@ -133,6 +133,12 @@ ml:
   forest_max_depth: 3
   random_state: 0
   interval_level: 0.95                  # f_lo / f_hi coverage (T4.5)
+validation:                             # T5.2 / T5.6
+  pair_max_minutes: 10                  # ground truth to device window midpoint, same plant (T5.2)
+  surface_pair_minutes: 5               # PLACEHOLDER: adaxial + abaxial readings summed only if this close (E4 "a few minutes")
+  gravimetric_match_hours: 1.0          # PLACEHOLDER: device windows this close to a weighing enter the gravimetric trend table (A45)
+  loa_z: 1.96                           # Bland-Altman limits of agreement = bias +/- loa_z x SD of differences
+  n_split_bins: 3                       # tertiles for the shape-deviation and g_s-range splits (T5.2)
 synthetic:                              # T4.2; used only by ml/synthetic_data.py. EVERY VALUE IS INVENTED (not a measurement or calibration)
   k_wm2_per_lux: 0.01                   # only in a returned synthetic calibration dict; light_sources.led_lamp k stays null
   a_s_card: 0.95
