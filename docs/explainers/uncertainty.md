@@ -147,6 +147,32 @@ Note: at 0.05 mol and σ_leaf 0.5 °C almost no window is censored, so the +3.9 
 3. **Errors were simulated as independent normal errors on window means.** Real errors may be correlated in time.
 4. It does not give an interval. Bootstrapping over windows would; not done yet.
 
+## Correlated card and leaf draws (A43, added in T6.1)
+The card and the leaf are seen by **one** thermal camera and share **one** air thermometer. With
+`uncertainty.card_leaf_shared_draws: true`, every card_direct draw uses:
+1. **One thermal offset** for both: T_leaf = T_leaf,meas + σ_leaf z₁ and T_card = T_card,meas + σ_leaf z₁.
+2. **One air temperature** for both (the same T_air draw).
+3. **r_bH re-solved from the card in that draw** (eq. 9):
+   r_bH = ρc_p (T_card − T_air) / (Rn_card × (1 + σ_rn,card z₆)).
+   Draws whose card r_bH ≤ 0 or |Rn_card| < min_abs_rn_wm2 are dropped.
+
+With the key false, r_bH is drawn as before: r_bH,meas × exp(σ_rb z₅), with σ_rb from the card's
+own interval.
+
+**Shared errors do not always cancel.**
+- *Thermal offset:* it raises T_card and T_leaf together, so it partly cancels in the card's
+  r_bH and the leaf's H.
+- *Air temperature:* the leaf is often cooler than the air while the card is warmer. A shared
+  air error then makes the card's ΔT smaller (r_bH smaller) and the leaf's ΔT more negative, so
+  both push λE the same way.
+
+So with the 0.5 °C air placeholder, sharing makes the detection limit worse (nothing resolved
+vs 0.29 mol m⁻² s⁻¹). With air 0.2 °C and RH 2 % it halves it (0.054 vs 0.118 mol m⁻² s⁻¹,
+tests/test_correlated_draws.py).
+
+**The detection limit also depends on n_draws** when the relative width sits near the 1.0
+threshold. Use the full 2000 draws for every reported limit (T6.1 finding).
+
 ## Methods paragraph (draft)
 Measurement uncertainty was propagated by Monte Carlo simulation (2000 draws per window, fixed seed). Leaf and air temperature errors were drawn as correlated normal deviates (σ = [x] and [y] °C, correlation [ρ], from calibration against a common reference thermometer); relative humidity errors were normal (σ = [z] %) with draws limited to 0–100 %; irradiance and boundary-layer resistance errors were lognormal (log-SD [a] and [b]). Each draw was re-solved with the full energy-balance model. Draws with non-positive latent heat flux were assigned g_s = 0 and draws with non-positive stomatal resistance were assigned the upper limit of the measurable range (2.0 mol m⁻² s⁻¹), so that intervals include closed- and fully-open-stomata outcomes; draws with non-positive VPD and positive latent heat flux have non-positive r_s and were therefore also assigned the upper limit. No draw was excluded. Intervals are the 2.5th–97.5th percentiles. A window was labelled resolved only when all three of the following held: at least 90 % of draws had positive latent heat flux, positive r_s and positive VPD; the relative 95 % interval width, (p97.5 − p2.5)/median, was strictly below 1.0; and the 97.5th percentile was strictly below the upper limit of the measurable range. The per-window detection limit was the smallest true g_s, on a logarithmic grid, meeting all three criteria under the window's conditions; grid points for which no leaf temperature satisfied the energy balance were counted and reported. Resolved status was reported, not used to exclude data. Software: Python 3.13, NumPy, SciPy [versions].
 
@@ -154,7 +180,7 @@ Measurement uncertainty was propagated by Monte Carlo simulation (2000 draws per
 1. **All sigmas are placeholders.** With them, nothing is resolved and the detection limit is undefined (see the worked example). Thermal calibration (T7.5) and light calibration are needed first.
 2. **Pressure and surroundings temperature are not perturbed** (C3). If T_sur is taken from the air sensor, its error is really shared with T_air. The longwave effect is about 5.7 W m⁻² K⁻¹ per face, small next to H (≈ 17 W m⁻² K⁻¹ at r_b = 70).
 3. **Errors are assumed independent between inputs** (except the leaf–air ρ) and **normal or lognormal**. A calibration offset that is the same in every window is not random within a session; it shifts all windows together.
-   - **The card and the leaf share the air thermometer** (register A38). With card_direct, one T_air error enters both the card's r_bH = ρcₚ(T_card − T_air)/Rn_card and the leaf's H = ρcₚ(T_leaf − T_air)/r_bH. Here the r_bH error (σ_rb) is drawn separately from the T_air error, so this correlation is ignored and the interval may be too wide or too narrow. It should be modelled in T6.1, where synthetic cards and leaves are generated together: one T_air error per window, applied to both.
+   - **The card and the leaf share the air thermometer** (register A38). With card_direct, one T_air error enters both the card's r_bH = ρcₚ(T_card − T_air)/Rn_card and the leaf's H = ρcₚ(T_leaf − T_air)/r_bH. Here the r_bH error (σ_rb) is drawn separately from the T_air error, so this correlation is ignored and the interval may be too wide or too narrow. Since T6.1 this can be switched on with `uncertainty.card_leaf_shared_draws: true` (see below); the default is still false.
 4. **The detection limit uses a grid** with steps of about 12 % in g_s, so it is accurate to about one grid step.
 5. **The resolved band has an upper end too.** At very high g_s the leaf is close to the wet limit and r_s ≤ 0 draws appear, so high values can also be unresolved. Only the lower limit is reported.
 6. **The cap (2.0 mol m⁻² s⁻¹) is UNVERIFIED.** It is chosen to be above typical soybean maxima, which have not been checked here.

@@ -150,6 +150,10 @@ uncertainty:
   # Added in T1.5 (2026-11-08, see decision_log):
   rho_leaf_air_temp: 0.0                # correlation of leaf and air temperature errors (shared reference thermometer); 0 = widest intervals
   g_s_cap_mol: 2.0                      # top of measurable range, mol m-2 s-1; UNVERIFIED. An upper bound at the cap means "not bounded above"
+  # Added in T6.1 (2026-11-10, see decision_log): A43 correlated draws. true = card_direct windows share ONE
+  # thermal-offset draw and ONE air-temperature draw with their matched card, and r_bH is re-solved from the
+  # card in every draw (eq. 9). false = r_bH drawn lognormal from the card interval (independent; unchanged).
+  card_leaf_shared_draws: false
   dl_grid_min_mol: 0.001                # detection-limit search grid (log spaced) from here up to g_s_cap_mol
   dl_grid_points: 60
 jones:                                  # Added in T1.6 (2026-11-08); values from spec T1.6
@@ -182,6 +186,37 @@ genotype_comparison:                    # Added in T5.3 (2026-11-10, see decisio
   # Censored below_detection values are replaced by fraction x detection limit; above_range by uncertainty.g_s_cap_mol.
   censor_substitution: {zero: 0.0, half_dl: 0.5, dl: 1.0}
   primary_substitution: half_dl         # a conclusion is robust only if it holds under every substitution
+dry_run:                                # Added in T6.1 (2026-11-10, see decision_log). processing/pipeline_dry_run.py ONLY.
+  # Changed 2026-11-11 (owner, decision_log): was 120 s, set for the old fast settings; with full detection-limit
+  # draws runs took 42-130 s on the laptop. Timing is machine-dependent; runtime is always reported.
+  max_runtime_s: 300
+  n_plants_per_group: 5
+  plant_sd_fraction: 0.10               # plant-to-plant spread of the planted true g_s
+  # Planted true g_s, mol m-2 s-1: genotype index (enumerations.genotype order) -> treatment. INVENTED.
+  true_gs_mol:
+    - {well_watered: 0.40, drought_stressed: 0.004}   # first genotype: stressed g_s near zero
+    - {well_watered: 0.40, drought_stressed: 0.24}    # second genotype: 40 % drop
+  min_first_genotype_drop_pct: 85.0     # check (c): planted drop is 99 %
+  card_winds_ms: [0.8, 2.0]             # card training sessions per shape
+  card_irradiance_wm2: 400.0
+  leaf_wind_ms: 0.8                     # inside the training wind range
+  leaf_duration_min: 8.0
+  # "If this calibration is achieved" sigmas (T5.4 synthetic target); NOT measured.
+  target_sigmas: {sigma_leaf_temp_c: 0.2, sigma_lux_fraction: 0.05}
+  # Air-temperature and RH scenarios (owner 2026-11-11), added to the target sigmas; --air-rh picks one.
+  # "If this calibration is achieved", NOT measured; 2 % RH may not be achievable with a BME280.
+  air_rh_scenarios:
+    placeholder:  {sigma_air_temp_c: 0.5, sigma_rh_pct: 3.0}   # = the uncertainty placeholders
+    intermediate: {sigma_air_temp_c: 0.3, sigma_rh_pct: 2.5}
+    target:       {sigma_air_temp_c: 0.2, sigma_rh_pct: 2.0}
+    # Added 2026-11-11 (owner, decision_log): also relaxes the leaf (0.4 C instead of the 0.2 C target); light stays 5 %.
+    relaxed:      {sigma_leaf_temp_c: 0.4, sigma_air_temp_c: 0.3, sigma_rh_pct: 3.0}
+  # Fast settings for the 2-minute run; --settings full uses the normal config values.
+  # Changed 2026-11-10 (T6.1 run 1, decision_log): uncertainty.n_draws and dl_grid_points are no longer
+  # reduced here; the detection limit depends on n_draws, so the dry run uses the full values.
+  fast: {ml: {n_bootstrap: 50, forest_n_estimators: 50}}
+  # Applied in every dry run (owner 2026-11-10): card and leaf share the thermal and air draws (A43).
+  overrides: {uncertainty: {card_leaf_shared_draws: true}}
 card_buoyancy:                          # Added in T5.9 (2026-11-10, see decision_log); threshold is convection.card_transfer_max_change
   leaf_delta_t_c: 1.0                   # leaf-like |T - T_air| that DECIDES card_transfer_unreliable (pre-registered)
   leaf_delta_t_low_c: 0.5               # also reported (= convection.min_grashof_delta_t_c floor)

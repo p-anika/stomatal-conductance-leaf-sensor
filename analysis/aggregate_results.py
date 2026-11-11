@@ -67,7 +67,8 @@ from processing.gs_calculator import LeafReading, solve_gs
 from processing.jones_index import conductance_index
 from processing.measurement_windows import build_windows
 from processing.physics_baseline import ReferenceCardReading, solve_card_rbh
-from processing.uncertainty import Sigmas, attach_uncertainty, card_rbh_uncertainty, get_sigmas, gs_uncertainty
+from processing.uncertainty import (CardLink, Sigmas, attach_uncertainty, card_link, card_rbh_uncertainty, get_sigmas,
+                                    gs_uncertainty)
 
 logger = logging.getLogger(__name__)
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -176,7 +177,7 @@ def card_windows(session: Session, cfg: dict[str, Any], cal: dict[str, Any]) -> 
             rec.update(valid=res.valid, reason=res.reason, flags=list(res.flags))
             if res.valid:
                 cu = card_rbh_uncertainty(reading, cfg, cal, n=n, seed=0)
-                rec.update(r_bh=res.r_bh, r_bh_lo=cu.r_bh_lo, r_bh_hi=cu.r_bh_hi)
+                rec.update(r_bh=res.r_bh, r_bh_lo=cu.r_bh_lo, r_bh_hi=cu.r_bh_hi, reading=reading)
         out.append(rec)
     return out
 
@@ -259,6 +260,7 @@ def session_results(session: Session, photo_features: pd.DataFrame | None, cards
                        resolved=False, convection_regime="unknown")
             flags = win_flags + wind_flags + jones_flags
             r_bh = r_lo = r_hi = None
+            link: CardLink | None = None
             sigma: float | None = None
             reason = ""
             regime = leaf_flat[1] if leaf_flat else None
@@ -275,6 +277,8 @@ def session_results(session: Session, photo_features: pd.DataFrame | None, cards
                         r_bh, r_lo, r_hi = card["r_bh"], card["r_bh_lo"], card["r_bh_hi"]
                         flags += card["flags"]
                         sigma = rb_sigma_from_interval(r_lo, r_hi)
+                        if cfg["uncertainty"].get("card_leaf_shared_draws", False):
+                            link = card_link(card["reading"], cfg, cal)   # one camera, one thermometer (A43)
                         if regime is None and card_ref is not None and getattr(card_ref, d_col, None):
                             fb = _regime(float(getattr(card_ref, d_col)), wind,
                                          card["card_temp_c"] - card["air_temp_c"], card["air_temp_c"], cfg)
@@ -323,7 +327,7 @@ def session_results(session: Session, photo_features: pd.DataFrame | None, cards
             reading = LeafReading(leaf, air, air, row["rh_pct"], row["pressure_hpa"], row["lux"],
                                   light_source, float(r_bh), method)
             res = solve_gs(reading, cfg, cal)
-            unc = gs_uncertainty(reading, cfg, cal, sigmas=s, seed=0)
+            unc = gs_uncertainty(reading, cfg, cal, sigmas=s, seed=0, card=link)
             res = attach_uncertainty(res, unc)
             flags += list(res.flags)
             if res.valid and unc.valid:

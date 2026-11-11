@@ -9,6 +9,16 @@ Error model per draw (n draws, numpy default_rng(seed)):
 Each draw is re-solved with eqs. 1-8 (solve_core, checked against gs_calculator.solve_gs).
 Pressure and surroundings temperature are not perturbed.
 
+Correlated card and leaf draws (card_direct, A43; uncertainty.card_leaf_shared_draws: true).
+The card and the leaf are seen by ONE thermal camera and share ONE air thermometer, so in each
+draw they get the same thermal offset (z1) and the same air temperature, and r_bH is re-solved
+from the card in that draw instead of drawn from a lognormal (eq. 9):
+    T_card = T_card_meas + sigma_leaf z1                      (same z1 as the leaf)
+    Rn_card = Rn(T_card, eq. 2, card a_s, emissivity, c_card) x (1 + sigma_rn_card z6)
+    r_bH   = rho cp (T_card - T_air) / Rn_card                (same T_air draw as the leaf)
+Draws whose card r_bH is <= 0 or whose |Rn_card| < min_abs_rn_wm2 are dropped (counted).
+With the key false (or no card), r_bH = r_bH_meas x exp(sigma_rb z5) exactly as before.
+
 Draw outcomes and the value used for percentiles (mol m-2 s-1). EVERY draw is used:
     lambdaE <= 0  -> 0 (closed stomata)
     r_s <= 0      -> g_s_cap_mol (top of measurable range). This includes VPD <= 0 with
@@ -153,6 +163,28 @@ def solve_core(t_s: np.ndarray, t_a: np.ndarray, t_sur: float | None, rh: np.nda
 # ---------------------------------------------------------------- draws
 
 @dataclass(frozen=True)
+class CardLink:
+    """The matched card window, so card_direct draws can share the leaf's errors (A43).
+    Temperatures deg C; e_s_card_wm2 = c_card x k x lux [W m-2] on the card."""
+    card_temp_c: float
+    surroundings_temp_c: float | None
+    e_s_card_wm2: float
+    a_s_card: float
+    emissivity: float
+
+
+def card_link(reading: ReferenceCardReading, cfg: dict[str, Any], cal: dict[str, Any]) -> CardLink:
+    """CardLink for a valid card reading (same light, absorptivity and position factor as eq. 9)."""
+    light = get_light_source(cfg, cal, reading.light_source)
+    a_s_card, _ = card_absorptivity(cfg, cal)
+    c_card = (reading.c_card if reading.c_card is not None
+              else get_position_factor(cfg, cal, "card")[0])
+    return CardLink(float(reading.card_temp_c), reading.surroundings_temp_c,
+                    lux_to_irradiance_wm2(reading.lux, light.k_wm2_per_lux, c_card),
+                    float(a_s_card), float(card_emissivity(cfg, cal)))
+
+
+@dataclass(frozen=True)
 class GsDraws:
     """All n draws (arrays). g_mol is nan unless status == OK."""
     t_leaf: np.ndarray
@@ -174,14 +206,28 @@ def _light_inputs(reading: LeafReading, cfg: dict[str, Any], cal: dict[str, Any]
 
 
 def _draw_at(t_leaf_c: float, reading: LeafReading, e_s_wm2: float, a_s: float,
-             s: Sigmas, n: int, seed: int, cfg: dict[str, Any]) -> GsDraws:
-    z = np.random.default_rng(seed).standard_normal((5, n))
+             s: Sigmas, n: int, seed: int, cfg: dict[str, Any], card: CardLink | None = None) -> GsDraws:
+    rng = np.random.default_rng(seed)
+    z = rng.standard_normal((5, n))
     t_leaf = t_leaf_c + s.leaf_temp_c * z[0]
     t_air = reading.air_temp_c + s.air_temp_c * (
         s.rho_leaf_air * z[0] + math.sqrt(1.0 - s.rho_leaf_air ** 2) * z[1])
     rh = np.clip(reading.relative_humidity_pct + s.rh_pct * z[2], 0.0, 100.0)
     e_s = e_s_wm2 * np.exp(s.lux_fraction * z[3])
-    r_bh = reading.r_bh * np.exp(s.rb_fraction * z[4])
+    if card is None:
+        r_bh = reading.r_bh * np.exp(s.rb_fraction * z[4])
+    else:
+        # one camera, one air thermometer: the card shares z1 and the T_air draw (A43)
+        phys = cfg["physics"]
+        lw = bool(phys["include_longwave"])
+        t_card = card.card_temp_c + s.leaf_temp_c * z[0]
+        t_sur = card.surroundings_temp_c if lw else reading.air_temp_c
+        rn_c = net_radiation_wm2(card.e_s_card_wm2, card.a_s_card, t_card, t_sur, card.emissivity,
+                                 phys["faces"], lw, cfg) * (1.0 + s.rn_card_fraction * rng.standard_normal(n))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            r_bh = rho_cp_j_m3_k(cfg) * (t_card - t_air) / rn_c
+        keep = (r_bh > 0) & (np.abs(rn_c) >= phys["min_abs_rn_wm2"])
+        t_leaf, t_air, rh, e_s, r_bh = t_leaf[keep], t_air[keep], rh[keep], e_s[keep], r_bh[keep]
     out = solve_core(t_leaf, t_air, reading.surroundings_temp_c, rh, reading.pressure_hpa,
                      e_s, a_s, r_bh, cfg)
     return GsDraws(t_leaf, t_air, rh, e_s, r_bh, out["latent"], out["vpd"], out["g_mol"],
@@ -189,12 +235,13 @@ def _draw_at(t_leaf_c: float, reading: LeafReading, e_s_wm2: float, a_s: float,
 
 
 def gs_draws(reading: LeafReading, cfg: dict[str, Any], cal: dict[str, Any],
-             sigmas: Sigmas | None = None, n: int | None = None, seed: int = 0) -> GsDraws:
+             sigmas: Sigmas | None = None, n: int | None = None, seed: int = 0,
+             card: CardLink | None = None) -> GsDraws:
     """Raw Monte Carlo draws for one window (for tests and diagnostics)."""
     light, e_s = _light_inputs(reading, cfg, cal)
     s = sigmas if sigmas is not None else get_sigmas(cfg, cal, light)
     n = n if n is not None else int(cfg["uncertainty"]["n_draws"])
-    return _draw_at(reading.leaf_temp_c, reading, e_s, light.a_s_leaf, s, n, seed, cfg)
+    return _draw_at(reading.leaf_temp_c, reading, e_s, light.a_s_leaf, s, n, seed, cfg, card)
 
 
 @dataclass(frozen=True)
@@ -280,20 +327,21 @@ def dl_grid(cfg: dict[str, Any]) -> np.ndarray:
 
 
 def resolution_at(reading: LeafReading, g_s_mol_true: float, cfg: dict[str, Any],
-                  cal: dict[str, Any], s: Sigmas, n: int, seed: int) -> Resolution | None:
+                  cal: dict[str, Any], s: Sigmas, n: int, seed: int,
+                  card: CardLink | None = None) -> Resolution | None:
     """Forward leaf temperature for a true g_s, then the same draws as gs_uncertainty.
     None when no forward leaf temperature exists (root search failed)."""
     t_leaf = forward_leaf_temp(reading, float(g_s_mol_true), cfg, cal)
     if t_leaf is None:
         return None
     light, e_s = _light_inputs(reading, cfg, cal)
-    sm = _summarise(_draw_at(t_leaf, reading, e_s, light.a_s_leaf, s, n, seed, cfg), cfg)
+    sm = _summarise(_draw_at(t_leaf, reading, e_s, light.a_s_leaf, s, n, seed, cfg, card), cfg)
     return Resolution(float(g_s_mol_true), float(t_leaf), sm.lo, sm.median, sm.hi, sm.frac_ok,
                       sm.rel_width, sm.resolved)
 
 
 def detection_limit_mol(reading: LeafReading, cfg: dict[str, Any], cal: dict[str, Any],
-                        s: Sigmas, n: int, seed: int) -> tuple[float | None, int]:
+                        s: Sigmas, n: int, seed: int, card: CardLink | None = None) -> tuple[float | None, int]:
     """(smallest true g_s on the grid resolved under this window's conditions or None,
     number of grid points where no forward leaf temperature was found).
 
@@ -308,7 +356,7 @@ def detection_limit_mol(reading: LeafReading, cfg: dict[str, Any], cal: dict[str
             if forward_leaf_temp(reading, float(g_true), cfg, cal) is None:
                 no_root += 1
             continue
-        r = resolution_at(reading, float(g_true), cfg, cal, s, n, seed)
+        r = resolution_at(reading, float(g_true), cfg, cal, s, n, seed, card)
         if r is None:
             no_root += 1
         elif r.resolved:
@@ -349,7 +397,7 @@ class GsUncertainty:
 
 def gs_uncertainty(reading: LeafReading, cfg: dict[str, Any], cal: dict[str, Any],
                    sigmas: Sigmas | None = None, n: int | None = None,
-                   seed: int = 0) -> GsUncertainty:
+                   seed: int = 0, card: CardLink | None = None) -> GsUncertainty:
     """Interval, censoring fractions, resolved label and detection limit for one window.
 
     Windows that solve_gs marks invalid (missing_input) return an invalid result with the
@@ -364,10 +412,10 @@ def gs_uncertainty(reading: LeafReading, cfg: dict[str, Any], cal: dict[str, Any
                              sigmas.placeholder if sigmas else False)
     light, _ = _light_inputs(reading, cfg, cal)
     s = sigmas if sigmas is not None else get_sigmas(cfg, cal, light)
-    d = gs_draws(reading, cfg, cal, s, n, seed)
+    d = gs_draws(reading, cfg, cal, s, n, seed, card)
     sm = _summarise(d, cfg)
     cap = float(cfg["uncertainty"]["g_s_cap_mol"])
-    dl, no_root = detection_limit_mol(reading, cfg, cal, s, n, seed)
+    dl, no_root = detection_limit_mol(reading, cfg, cal, s, n, seed, card)
     return GsUncertainty(
         valid=True, reason="ok",
         g_s_mol_median=sm.median, g_s_mol_lo=sm.lo, g_s_mol_hi=sm.hi,
