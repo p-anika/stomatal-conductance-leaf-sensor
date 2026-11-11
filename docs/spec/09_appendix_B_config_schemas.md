@@ -156,6 +156,8 @@ synthetic:                              # T4.2; used only by ml/synthetic_data.p
   start_iso: "2026-11-09T10:00:00+00:00"
   roi_n_px: 20
   root_bracket_c: [-20.0, 40.0]         # root-finder search range around air temperature, deg C
+  bracket_dry_g_s_mol: 1.0e-6           # analysis/detection_limit.py (T5.4); INVENTED: petroleum-jelly leaf stand-in
+  bracket_wet_g_s_mol: 1000.0           # INVENTED: wet reference stand-in (r_s about 0)
   delta_t_sweep:                        # ml/delta_t_sweep.py (T4.3 follow-up); INVENTED settings
     irradiance_wm2: [60.0, 100.0, 200.0, 400.0, 800.0]   # incident on the card
     wind_ms: [0.8, 2.0]
@@ -190,6 +192,6 @@ Rules: k\_wm2\_per\_lux is a number above 0 and a\_s\_leaf is a number in (0, 1\
 
 **data/processed/rb\_training\_set.csv columns:** row\_id, session\_id, card\_id, shape\_group, window\_start\_iso, window\_end\_iso, n\_samples, card\_temp\_c, air\_temp\_c, surroundings\_temp\_c, lux, light\_source, rn\_wm2, c\_card, wind\_ms, convection\_regime, r\_bh\_card, r\_bh\_card\_sigma, r\_bh\_flat, f\_ratio, the geometry feature columns, photo\_gap\_sec, incidence\_angle\_deg, valid, reason.
 
-**data/processed/leaf\_gs\_results.csv columns:** session\_id, plant\_id, genotype, water\_treatment, block, position, leaf\_position, reproductive\_stage, window\_start\_iso, window\_end\_iso, n\_samples, steady\_state, method, method\_role, convection\_regime, r\_bh, r\_bh\_lo, r\_bh\_hi, leaf\_temp\_c, air\_temp\_c, rh\_pct, pressure\_hpa, lux, rn\_wm2, latent\_wm2, vpd\_pa, r\_s, g\_s\_ms, g\_s\_mol, g\_s\_mol\_lo, g\_s\_mol\_hi, resolved, censor (none, below\_detection, above\_range), g\_s\_mol\_dl, valid, reason, flags, photo\_gap\_sec, jones\_ig, cwsi.
+**data/processed/leaf\_gs\_results.csv columns:** session\_id, plant\_id, genotype, water\_treatment, block, position, leaf\_position, reproductive\_stage, window\_start\_iso, window\_end\_iso, n\_samples, steady\_state, method, method\_role, convection\_regime, r\_bh, r\_bh\_lo, r\_bh\_hi, leaf\_temp\_c, air\_temp\_c, rh\_pct, pressure\_hpa, lux, rn\_wm2, latent\_wm2, vpd\_pa, r\_s, g\_s\_ms, g\_s\_mol, g\_s\_mol\_lo, g\_s\_mol\_hi, resolved, censor (none, below\_detection, above\_range), g\_s\_mol\_dl, valid, reason, flags, photo\_gap\_sec, jones\_ig, cwsi, light\_source, jones\_ig\_censor (none, above\_range; blank when not computed).
 
 **data/validation/ground\_truth\_gs.csv columns:** plant\_id, timestamp\_iso, instrument (porometer or gravimetric), surface (adaxial, abaxial, both\_summed or whole\_leaf), g\_s\_mol, leaf\_position, notes.
