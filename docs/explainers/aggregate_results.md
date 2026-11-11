@@ -85,6 +85,15 @@ For each 60 s steady-state window, stomatal conductance was computed from the le
 
 The roles of the three methods were fixed before data collection. Uncertainty was propagated by Monte Carlo (2000 draws per window). The boundary-layer resistance was perturbed log-normally, with a spread taken from each method's own 95 % interval. Windows where the latent heat flux was ≤ 0 or the stomatal resistance was ≤ 0 were retained as left- or right-censored values, with a per-window detection limit, and were never removed. Analyses used Python 3.13.12, NumPy 2.5.4, SciPy 1.18.1 and pandas 3.1.1.
 
+## Interval details added 2026-11-11 (review fixes)
+- **New column `n_draws_unusable`:** how many Monte Carlo draws had no valid r_bH. They are
+  kept and count as not usable (flags `draws_unusable`, `draws_all_unusable`).
+- **Flag `interval_diagnostic_only`:** the usable fraction is below 90 %, so the row is
+  unresolved and its interval is for diagnosis only.
+- **ml_corrected:** the r_bH spread comes from the model's own interval level and is drawn
+  *normal*, because the ML interval is Gaussian in f. If the interval's lower end f_lo ≤ 0, the
+  flat-plate placeholder spread is used and the row is flagged `rb_sigma_fallback`.
+
 ## Limitations
 - **Shared camera error (open item, A43).** The leaf and the card are read by the same thermal camera. Part of their temperature error is therefore shared, and in card_direct it partly cancels. The Monte Carlo treats the card's r_bH interval and the leaf temperature as independent, so card_direct intervals are **probably too wide (conservative)**. Fix: draw the card and leaf temperature errors together (correlated draws).
 - **flat_plate interval too small:** σ_rb = 0.2 against a possible 3× error (decision 20).

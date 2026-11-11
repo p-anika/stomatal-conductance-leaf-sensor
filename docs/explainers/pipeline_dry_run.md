@@ -341,6 +341,74 @@ The exact 5-vs-5 test can only reach discrete p-values, so its true rate below 0
 consistent with that. The tests do not find effects that are not there more often than they
 should.
 
+### Run 5 (2026-11-11): after the review fixes (before → after, seeds 0–4)
+**What changed in the code:**
+- Unusable Monte Carlo draws are now **kept and counted** instead of dropped. They count as not
+  usable.
+- ml_corrected r_bH is drawn **normal**, at the model's own interval level.
+- The r_bH sigma uses the real interval level.
+- No threshold or scenario changed.
+
+"Before" is runs 3 and 4 (unchanged above); "after" is the rerun with the fixed code.
+
+| Scenario | Seed | c before → after | d before → after | exit before → after | campaign DL before → after | resolved rows before → after | runtime before → after |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| target | 0 | PASS → PASS | PASS → PASS | 0 → 0 | 0.118 → 0.118 | 267 → 267 | 75.1 → 39.6 s |
+| target | 1 | PASS → PASS | PASS → PASS | 0 → 0 | 0.118 → 0.118 | 258 → 258 | 100.4 → 38.5 s |
+| target | 2 | PASS → PASS | PASS → PASS | 0 → 0 | 0.118 → 0.118 | 270 → 270 | 104.9 → 38.0 s |
+| target | 3 | PASS → PASS | PASS → PASS | 0 → 0 | 0.118 → 0.118 | 261 → 261 | 96.7 → 26.4 s |
+| target | 4 | PASS → PASS | PASS → PASS | 0 → 0 | 0.103 → 0.103 | 264 → 264 | 39.4 → 26.5 s |
+| intermediate | 0 | FAIL → FAIL | PASS → PASS | 1 → 1 | 0.152 → 0.152 | 264 → 264 | 58.5 → 37.7 s |
+| intermediate | 1 | PASS → PASS | PASS → PASS | 0 → 0 | 0.152 → 0.152 | 236 → 236 | 61.3 → 37.9 s |
+| intermediate | 2 | PASS → PASS | PASS → PASS | 0 → 0 | 0.173 → 0.173 | 233 → 233 | 62.0 → 38.0 s |
+| intermediate | 3 | FAIL → FAIL | PASS → PASS | 1 → 1 | 0.152 → 0.152 | 248 → 248 | 40.0 → 26.8 s |
+| intermediate | 4 | PASS → PASS | PASS → PASS | 0 → 0 | 0.134 → 0.134 | 234 → 234 | 43.3 → 26.6 s |
+| relaxed | 0 | FAIL → FAIL | FAIL → FAIL | 1 → 1 | none → none | **18 → 15** | 146.0 → 38.8 s |
+| relaxed | 1 | FAIL → FAIL | FAIL → FAIL | 1 → 1 | none → none | 5 → 6 | 109.8 → 39.0 s |
+| relaxed | 2 | not evaluated → not evaluated | not evaluated → not evaluated | 0 → 0 | none → none | 0 → 0 | 60.2 → 39.7 s |
+| relaxed | 3 | FAIL → FAIL | FAIL → FAIL | 1 → 1 | none → none | 8 → 8 | 51.9 → 42.9 s |
+| relaxed | 4 | FAIL → FAIL | FAIL → FAIL | 1 → 1 | none → none | 7 → 7 | 75.2 → 28.4 s |
+
+Check b passed (or was not evaluated, relaxed seed 2) exactly as before. The first-genotype drop
+and the difference of drops are unchanged to one decimal.
+
+What the fixes found:
+- **Unusable card draws were rare at target, and common in the relaxed scenario:**
+
+  | Scenario | Seed(s) | card_direct unusable draws | rows with `draws_unusable` |
+  | --- | --- | --- | --- |
+  | target | all | 0 | 0 |
+  | intermediate | 1 | 2 | 2 |
+  | intermediate | 4 | 41 | 6 |
+  | relaxed | 0 | 6 | 6 |
+  | relaxed | 1 | 1125 | 17 |
+  | relaxed | 2 | 161 | 29 |
+  | relaxed | 3 | 550 | 20 |
+  | relaxed | 4 | 666 | 6 |
+
+  No row lost every draw.
+- **Worse:** relaxed seed 0 now has 3 fewer resolved rows (18 → 15). Before the fix, those
+  windows were called resolved only because the unusable card draws had been dropped.
+- **Better:** relaxed seed 1 has one more resolved row (5 → 6). This comes from the ML interval
+  change, not from fix 1.
+- **No `rb_sigma_fallback` row** in any run: the ML lower bound f_lo stayed above 0.
+- **`interval_diagnostic_only`** marks 75–87 rows per run. These are mostly windows near or
+  below detection, whose usable fraction is under 90 %.
+- **Runtimes are lower in every run (26–43 s).** This is not caused by the fixes; it is
+  machine-dependent timing (the earlier runs shared the machine with other jobs). Runtime is
+  reported, not compared.
+
+**Sensitivity, reported only: normal vs delta-method lognormal for ml_corrected r_bH** (target,
+seed 0). Both give the same numbers:
+- 89 of 118 valid ml_corrected rows resolved
+- median detection limit 0.0799 mol m⁻² s⁻¹
+- median relative width 0.596
+- 0 unusable draws
+- every check identical
+
+The ML relative spread here is small (sd_f / f̂ about 0.05–0.1), so the two distributions barely
+differ. They would differ only for a wide ML interval.
+
 ## Findings
 1. **ML corrects r_bH on unusual leaf shapes.** On seeds 0–4 its r_bH error is 5–16 %, against
    about 30 % for the flat plate. Without per-session offsets it also has 1.7–8 times lower g_s
@@ -354,6 +422,9 @@ should.
    (not resolved). The root search did not fail (`dl_grid_no_root` = 0).
    **Every earlier detection-limit number made with the fast settings, including the T5.4
    sweep, must be rerun with full draws and real calibration.**
+   [CORRECTED 2026-11-11: the T5.4 sweep used the config's 2000 draws, not the fast settings.
+   It must be rerun because its sigmas were invented test values (leaf 0.2 °C, air 0.1 °C,
+   RH 1 %, light 5 %), i.e. with real calibration.]
 4. **Correlated card and leaf draws help only when the air-temperature error is small.**
    Sharing the thermal and air draws halves the card_direct detection limit at air 0.2 °C /
    RH 2 %. At the 0.5 °C air placeholder it makes the limit worse, because the shared air error
@@ -403,10 +474,14 @@ corrections, known stomatal conductances and a planted genotype × treatment int
 including a stressed group with near-zero conductance. Each session received one random offset
 per sensor drawn from the target calibration uncertainties (leaf temperature 0.2 °C, light 5 %).
 Card and leaf errors were drawn jointly, since both are measured by the same thermal camera and
-air sensor. Five random seeds were run. The ML correction reduced the r_bH error on atypical leaf
-shapes from about 30 % (flat plate) to 5–16 %. The planted interaction could not be tested on
-these settings because the card-direct detection limit was not resolved with the current
-air-temperature and humidity uncertainty placeholders.
+air sensor. Five random seeds were run in each of several calibration scenarios. The ML correction reduced
+the r_bH error on atypical leaf shapes from about 30 % (flat plate) to 5–20 %. With target
+uncertainties (leaf 0.2 °C, air 0.2 °C, RH 2 %, light 5 %) the planted genotype × treatment
+interaction was recovered on 5 of 5 seeds; with the current air-temperature and humidity
+placeholders (0.5 °C, 3 %) or a 0.4 °C leaf error the card-direct detection limit was not
+resolved and the quantitative comparison was refused, while rank tests on plant medians still
+recovered the planted ordering. [CORRECTED 2026-11-11: earlier text said the interaction could
+not be tested; run 3 recovered it on 5 of 5 seeds in the target scenario.]
 
 ## Limitations
 - **Synthetic physics only.** The data are made with the same equations used to analyse them,

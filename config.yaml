@@ -217,6 +217,8 @@ dry_run:                                # Added in T6.1 (2026-11-10, see decisio
   fast: {ml: {n_bootstrap: 50, forest_n_estimators: 50}}
   # Applied in every dry run (owner 2026-11-10): card and leaf share the thermal and air draws (A43).
   overrides: {uncertainty: {card_leaf_shared_draws: true}}
+  # No-effect check of the rank tests (T6.1 diagnostic). Moved from code 2026-11-11 (review). INVENTED values.
+  null_check: {gs_mol: 0.40, plant_sd_mol: 0.03, window_sd_mol: 0.03, n_plants: 5, n_windows: 6, alpha: 0.05}
 card_buoyancy:                          # Added in T5.9 (2026-11-10, see decision_log); threshold is convection.card_transfer_max_change
   leaf_delta_t_c: 1.0                   # leaf-like |T - T_air| that DECIDES card_transfer_unreliable (pre-registered)
   leaf_delta_t_low_c: 0.5               # also reported (= convection.min_grashof_delta_t_c floor)

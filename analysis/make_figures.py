@@ -42,7 +42,7 @@ TABLES = ("validation_gs_summary", "validation_gs_detection", "validation_gs_one
           "validation_gs_gravimetric_summary", "benchmark_primary", "benchmark_wilcoxon", "benchmark_by_shape",
           "benchmark_by_gs_range", "benchmark_by_regime", "genotype_summary", "genotype_effects", "genotype_anova",
           "genotype_mixed_model", "genotype_rank_tests", "genotype_censor_share", "genotype_robustness",
-          "genotype_counts", "genotype_notes", "detection_limit_sweep", "detection_limit_brackets",
+          "genotype_counts", "genotype_notes", "genotype_excluded_by_group", "detection_limit_sweep", "detection_limit_brackets",
           "vaseline_rb_summary", "vaseline_rb_cases", "card_buoyancy_check")
 SKIP_ERRORS = (FileNotFoundError, SchemaError, CalibrationMissing)
 

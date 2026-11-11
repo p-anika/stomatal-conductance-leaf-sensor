@@ -165,6 +165,20 @@ card-direct method was primary; the ML-corrected and flat-plate methods, the Jon
 CWSI were sensitivity analyses. Analyses used Python 3.13.12, statsmodels 0.15.0, SciPy 1.18.1,
 NumPy 2.5.4 and pandas 3.1.1.
 
+### Windows excluded as not steady, by group (added 2026-11-11)
+The steady-state test keeps a window only if the leaf temperature is not drifting. That is a
+choice based on the *measured* leaf temperature. A leaf whose stomata are closing warms up and
+drifts, so drought-stressed windows may be thrown out more often than watered ones. If that
+happened, the stressed group would look less stressed than it is.
+
+`genotype_excluded_by_group.csv` shows, for every outcome and every genotype × treatment group:
+- how many windows went in
+- how many were excluded as `not_steady_state`
+- that share
+
+A clearly higher share in one group is a warning sign for the comparison. It is reported, not
+corrected.
+
 ## Limitations
 - **No day effect in the model.** Day-to-day changes in the room are handled only by the design
   rule above.

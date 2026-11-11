@@ -68,14 +68,14 @@ from processing.jones_index import conductance_index
 from processing.measurement_windows import build_windows
 from processing.physics_baseline import ReferenceCardReading, solve_card_rbh
 from processing.uncertainty import (CardLink, Sigmas, attach_uncertainty, card_link, card_rbh_uncertainty, get_sigmas,
-                                    gs_uncertainty)
+                                    gs_uncertainty, INTERVAL_LEVEL)
 
 logger = logging.getLogger(__name__)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MM_PER_M = 1000.0
 SECONDS_PER_MINUTE = 60.0
-# Two-sided 95 % interval: the Monte Carlo reports 2.5 and 97.5 percentiles.
-Z95 = float(norm.ppf(0.975))
+# Two-sided interval of the Monte Carlo (2.5 / 97.5 percentiles): level from uncertainty.INTERVAL_LEVEL.
+Z95 = float(norm.ppf(0.5 + INTERVAL_LEVEL / 2.0))
 ROLES = ("primary", "secondary", "baseline")
 CARD_TEMP = "card_temp_c"
 WET_TEMP = "wet_ref_temp_c"
@@ -89,7 +89,8 @@ APPENDIX_B_COLUMNS = (
     "g_s_mol_lo", "g_s_mol_hi", "resolved", "censor", "g_s_mol_dl", "valid", "reason", "flags",
     "photo_gap_sec", "jones_ig", "cwsi")
 # Deviations from Appendix B (decision_log 2026-11-10).
-RESULT_COLUMNS = APPENDIX_B_COLUMNS + ("light_source", "jones_ig_censor")
+RESULT_COLUMNS = APPENDIX_B_COLUMNS + ("light_source", "jones_ig_censor",
+                                      "n_draws_unusable")       # review fix 2026-11-11
 META_COLUMNS = ("plant_id", "genotype", "water_treatment", "block", "position", "leaf_position",
                 "reproductive_stage")
 
@@ -117,21 +118,34 @@ def _join(flags: list[str]) -> str:
     return ";".join(dict.fromkeys(f for f in flags if f))
 
 
-def rb_sigma_from_interval(lo: float | None, hi: float | None) -> float | None:
-    """Log-normal sigma of r_bH from its 95 % interval: ln(hi / lo) / (2 x 1.96) (dimensionless).
-    None when the interval cannot be read that way (lo <= 0, hi <= lo, or not finite)."""
+def rb_sigma_from_interval(lo: float | None, hi: float | None, level: float = INTERVAL_LEVEL) -> float | None:
+    """Log-normal sigma of r_bH from its central interval at `level` (e.g. 0.95):
+        sigma = ln(hi / lo) / (2 z),  z = Phi^-1(0.5 + level / 2)   (dimensionless).
+    Used for card_direct (the card Monte Carlo's 2.5 / 97.5 percentiles). None when the interval
+    cannot be read that way (lo <= 0, hi <= lo, or not finite)."""
     lo_f, hi_f = _num(lo), _num(hi)
     if not (math.isfinite(lo_f) and math.isfinite(hi_f)) or lo_f <= 0 or hi_f <= lo_f:
         return None
-    return math.log(hi_f / lo_f) / (2.0 * Z95)
+    return math.log(hi_f / lo_f) / (2.0 * float(norm.ppf(0.5 + level / 2.0)))
 
 
-def _sigmas_for(base: Sigmas, rb_fraction: float | None, source: str) -> Sigmas:
-    """Same sigmas with the r_bH spread replaced (source recorded)."""
+def ml_rb_fraction(f_hat: float | None, f_lo: float | None, f_hi: float | None, level: float) -> float | None:
+    """Relative 1-sigma of r_bH for ml_corrected. The ML interval is Gaussian in f:
+        f_lo, f_hi = f_hat -/+ z sd_f,  z = Phi^-1(0.5 + level / 2)  ->  sigma_rel = sd_f / f_hat
+    (r_bH = f x r_bH,flat, so the relative spread of r_bH equals that of f). Used with NORMAL r_bH
+    draws. None when f_lo <= 0 or the numbers are not usable (caller falls back, flag rb_sigma_fallback)."""
+    f, lo, hi = _num(f_hat), _num(f_lo), _num(f_hi)
+    if not all(math.isfinite(v) for v in (f, lo, hi)) or lo <= 0 or f <= 0 or hi <= lo:
+        return None
+    return (hi - lo) / (2.0 * float(norm.ppf(0.5 + level / 2.0))) / f
+
+
+def _sigmas_for(base: Sigmas, rb_fraction: float | None, source: str, distribution: str = "lognormal") -> Sigmas:
+    """Same sigmas with the r_bH spread (and its distribution) replaced (source recorded)."""
     if rb_fraction is None:
         return base
     sources = tuple((k, source if k == "sigma_rb_fraction" else v) for k, v in base.sources)
-    return replace(base, rb_fraction=float(rb_fraction), sources=sources)
+    return replace(base, rb_fraction=float(rb_fraction), sources=sources, rb_distribution=distribution)
 
 
 def dl_flags(g_s_mol_dl: float | None, dl_grid_no_root: int) -> list[str]:
@@ -262,6 +276,7 @@ def session_results(session: Session, photo_features: pd.DataFrame | None, cards
             r_bh = r_lo = r_hi = None
             link: CardLink | None = None
             sigma: float | None = None
+            distribution = "lognormal"
             reason = ""
             regime = leaf_flat[1] if leaf_flat else None
 
@@ -309,7 +324,12 @@ def session_results(session: Session, photo_features: pd.DataFrame | None, cards
                         reason = pred.reason
                     else:
                         r_bh, r_lo, r_hi = pred.r_bh, pred.r_bh_lo, pred.r_bh_hi
-                        sigma = rb_sigma_from_interval(r_lo, r_hi)
+                        level = float(model.get("interval_level", cfg["ml"]["interval_level"]))
+                        sigma = ml_rb_fraction(pred.f_hat, pred.f_lo, pred.f_hi, level)
+                        if sigma is None:
+                            flags.append("rb_sigma_fallback")      # f_lo <= 0: flat-plate placeholder sigma used
+                        else:
+                            distribution = "normal"                # the ML interval is Gaussian in f
 
             if regime is not None:
                 row["convection_regime"] = regime
@@ -323,7 +343,7 @@ def session_results(session: Session, photo_features: pd.DataFrame | None, cards
                 flags.append("marginal")
             s = _sigmas_for(base_sigmas, sigma if sigma is not None else sigma_flat,
                             "method_interval" if sigma is not None and method != "flat_plate"
-                            else dict(base_sigmas.sources)["sigma_rb_fraction"])
+                            else dict(base_sigmas.sources)["sigma_rb_fraction"], distribution)
             reading = LeafReading(leaf, air, air, row["rh_pct"], row["pressure_hpa"], row["lux"],
                                   light_source, float(r_bh), method)
             res = solve_gs(reading, cfg, cal)
@@ -332,11 +352,16 @@ def session_results(session: Session, photo_features: pd.DataFrame | None, cards
             flags += list(res.flags)
             if res.valid and unc.valid:
                 flags += dl_flags(unc.g_s_mol_dl, unc.dl_grid_no_root)
+                if unc.n_draws_unusable:
+                    flags.append("draws_all_unusable" if unc.all_draws_unusable else "draws_unusable")
+                if unc.frac_resolved is not None and unc.frac_resolved < float(cfg["uncertainty"]["dl_min_resolved_fraction"]):
+                    flags.append("interval_diagnostic_only")   # usable fraction < 90 %: unresolved, interval not a result
             row.update(r_bh=r_bh, r_bh_lo=_num(r_lo), r_bh_hi=_num(r_hi), rn_wm2=_num(res.rn_wm2),
                        latent_wm2=_num(res.latent_wm2), vpd_pa=_num(res.vpd_pa), r_s=_num(res.r_s),
                        g_s_ms=_num(res.g_s_ms), g_s_mol=_num(res.g_s_mol), g_s_mol_lo=_num(res.g_s_lo),
                        g_s_mol_hi=_num(res.g_s_hi), g_s_mol_dl=_num(res.g_s_mol_dl), censor=res.censor,
-                       resolved=bool(unc.resolved), valid=res.valid, reason=res.reason, flags=_join(flags))
+                       resolved=bool(unc.resolved), valid=res.valid, reason=res.reason, flags=_join(flags),
+                       n_draws_unusable=int(unc.n_draws_unusable) if unc.valid else math.nan)
             rows.append(row)
     return rows
 

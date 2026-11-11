@@ -174,7 +174,7 @@ def _steady(df: pd.DataFrame) -> pd.DataFrame:
 def test_columns_are_appendix_b_plus_logged_deviations(results):
     assert list(results.columns) == list(RESULT_COLUMNS)
     assert list(RESULT_COLUMNS[:len(APPENDIX_B_COLUMNS)]) == list(APPENDIX_B_COLUMNS)
-    assert set(RESULT_COLUMNS) - set(APPENDIX_B_COLUMNS) == {"light_source", "jones_ig_censor"}
+    assert set(RESULT_COLUMNS) - set(APPENDIX_B_COLUMNS) == {"light_source", "jones_ig_censor", "n_draws_unusable"}
 
 
 def test_three_rows_per_window_none_missing(results, campaign):

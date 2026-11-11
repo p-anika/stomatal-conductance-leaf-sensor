@@ -352,7 +352,22 @@ def censor_share(w: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------- run
 
 TABLES = ("summary", "effects", "anova", "mixed_model", "rank_tests", "censor_share", "robustness",
-          "counts", "notes", "windows")
+          "counts", "notes", "windows", "excluded_by_group")
+
+
+def excluded_by_group(results: pd.DataFrame, oc: Outcome) -> pd.DataFrame:
+    """Per genotype x treatment: windows in, windows excluded as not_steady_state and their share
+    (review 2026-11-11: the steady-state test selects on the measured leaf temperature)."""
+    r = results[_text(results["method"]) == oc.method]
+    if r.empty:
+        return pd.DataFrame(columns=["genotype", "water_treatment", "n_windows_in", "n_not_steady_state",
+                                     "share_not_steady_state"])
+    not_steady = _text(r["reason"]) == "not_steady_state" if oc.kind == "gs" else ~_bool(r["steady_state"])
+    g = pd.DataFrame({"genotype": _text(r["genotype"]), "water_treatment": _text(r["water_treatment"]),
+                      "ns": not_steady.to_numpy()}).groupby(["genotype", "water_treatment"])
+    out = pd.DataFrame({"n_windows_in": g.size(), "n_not_steady_state": g["ns"].sum().astype(int)}).reset_index()
+    out["share_not_steady_state"] = out["n_not_steady_state"] / out["n_windows_in"]
+    return out
 
 
 def _tag(df: pd.DataFrame, **cols: Any) -> pd.DataFrame:
@@ -373,6 +388,8 @@ def analyse(results: pd.DataFrame, oc: Outcome, subset: str, cfg: dict[str, Any]
         out["notes"].append(pd.DataFrame([{**tag, "message": msg}]))
 
     w, counts = prepare(results, oc, campaign_dl)
+    if subset == "all":
+        out["excluded_by_group"].append(_tag(excluded_by_group(results, oc), **tag))
     if subset == "forced_only":
         before = len(w)
         w = w[w["convection_regime"] == "forced"].reset_index(drop=True)

@@ -154,7 +154,10 @@ The card and the leaf are seen by **one** thermal camera and share **one** air t
 2. **One air temperature** for both (the same T_air draw).
 3. **r_bH re-solved from the card in that draw** (eq. 9):
    r_bH = ρc_p (T_card − T_air) / (Rn_card × (1 + σ_rn,card z₆)).
-   Draws whose card r_bH ≤ 0 or |Rn_card| < min_abs_rn_wm2 are dropped.
+   Draws whose card r_bH ≤ 0 or |Rn_card| < min_abs_rn_wm2 are **kept as unusable**: they have no
+   g_s, count as not usable in the 90 % test, and are counted (`n_draws_unusable`, flags
+   `draws_unusable` / `draws_all_unusable`). [CORRECTED 2026-11-11: they were dropped before, which
+   made intervals optimistic.]
 
 With the key false, r_bH is drawn as before: r_bH,meas × exp(σ_rb z₅), with σ_rb from the card's
 own interval.
@@ -173,8 +176,19 @@ tests/test_correlated_draws.py).
 **The detection limit also depends on n_draws** when the relative width sits near the 1.0
 threshold. Use the full 2000 draws for every reported limit (T6.1 finding).
 
+## Unusable draws and normal r_bH draws (review fix, 2026-11-11)
+- **Unusable draw:** a draw with no valid r_bH. It is kept, gets no g_s, and counts as *not usable*.
+  So it can only make a window less resolved, never more.
+- **All draws unusable:** the row stays valid but is unresolved, with no interval (flag
+  `draws_all_unusable`).
+- **Any row whose usable fraction is below 90 %:** unresolved, flagged `interval_diagnostic_only`.
+  Its interval is for diagnosis only, not a result.
+- **ml_corrected r_bH draws are normal,** not lognormal, because the ML interval is Gaussian in f:
+  r_bH = r̂ × (1 + (sd_f / f̂) z). The level is the model's own `interval_level`. If f_lo ≤ 0, the
+  flat-plate placeholder sigma is used and the row is flagged `rb_sigma_fallback`.
+
 ## Methods paragraph (draft)
-Measurement uncertainty was propagated by Monte Carlo simulation (2000 draws per window, fixed seed). Leaf and air temperature errors were drawn as correlated normal deviates (σ = [x] and [y] °C, correlation [ρ], from calibration against a common reference thermometer); relative humidity errors were normal (σ = [z] %) with draws limited to 0–100 %; irradiance and boundary-layer resistance errors were lognormal (log-SD [a] and [b]). Each draw was re-solved with the full energy-balance model. Draws with non-positive latent heat flux were assigned g_s = 0 and draws with non-positive stomatal resistance were assigned the upper limit of the measurable range (2.0 mol m⁻² s⁻¹), so that intervals include closed- and fully-open-stomata outcomes; draws with non-positive VPD and positive latent heat flux have non-positive r_s and were therefore also assigned the upper limit. No draw was excluded. Intervals are the 2.5th–97.5th percentiles. A window was labelled resolved only when all three of the following held: at least 90 % of draws had positive latent heat flux, positive r_s and positive VPD; the relative 95 % interval width, (p97.5 − p2.5)/median, was strictly below 1.0; and the 97.5th percentile was strictly below the upper limit of the measurable range. The per-window detection limit was the smallest true g_s, on a logarithmic grid, meeting all three criteria under the window's conditions; grid points for which no leaf temperature satisfied the energy balance were counted and reported. Resolved status was reported, not used to exclude data. Software: Python 3.13, NumPy, SciPy [versions].
+Measurement uncertainty was propagated by Monte Carlo simulation (2000 draws per window, fixed seed). Leaf and air temperature errors were drawn as correlated normal deviates (σ = [x] and [y] °C, correlation [ρ], from calibration against a common reference thermometer); relative humidity errors were normal (σ = [z] %) with draws limited to 0–100 %; irradiance errors were lognormal (log-SD [a]); boundary-layer resistance errors were lognormal for the flat-plate method (log-SD [b]), normal for the ML-corrected method (relative SD from the model's Gaussian interval in f), and, for the card-direct method with shared draws, came from re-solving the card's r_bH in each draw with the same thermal and air-temperature errors as the leaf. Draws without a valid r_bH were kept, counted and treated as not usable. Each draw was re-solved with the full energy-balance model. Draws with non-positive latent heat flux were assigned g_s = 0 and draws with non-positive stomatal resistance were assigned the upper limit of the measurable range (2.0 mol m⁻² s⁻¹), so that intervals include closed- and fully-open-stomata outcomes; draws with non-positive VPD and positive latent heat flux have non-positive r_s and were therefore also assigned the upper limit. No draw was excluded. Intervals are the 2.5th–97.5th percentiles. A window was labelled resolved only when all three of the following held: at least 90 % of draws had positive latent heat flux, positive r_s and positive VPD; the relative 95 % interval width, (p97.5 − p2.5)/median, was strictly below 1.0; and the 97.5th percentile was strictly below the upper limit of the measurable range. The per-window detection limit was the smallest true g_s, on a logarithmic grid, meeting all three criteria under the window's conditions; grid points for which no leaf temperature satisfied the energy balance were counted and reported. Resolved status was reported, not used to exclude data. Software: Python 3.13, NumPy, SciPy [versions].
 
 ## Limitations
 1. **All sigmas are placeholders.** With them, nothing is resolved and the detection limit is undefined (see the worked example). Thermal calibration (T7.5) and light calibration are needed first.

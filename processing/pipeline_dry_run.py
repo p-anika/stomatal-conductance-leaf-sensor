@@ -363,8 +363,6 @@ def evaluate(df: pd.DataFrame, tables: dict[str, pd.DataFrame] | None, cfg: dict
 # ---------------------------------------------------------------- ordering diagnostic (never a check)
 
 DIAG = "DIAG"
-NULL_GS_MOL, NULL_PLANT_SD, NULL_WINDOW_SD = 0.40, 0.03, 0.03     # no-effect frames: invented, mol m-2 s-1
-NULL_PLANTS, NULL_WINDOWS = 5, 6
 
 
 def ordering_diagnostic(results: pd.DataFrame, cfg: dict[str, Any], rng_seed: int = 0) -> pd.DataFrame:
@@ -442,9 +440,11 @@ def append_diagnostic(checks: pd.DataFrame, results: pd.DataFrame, cfg: dict[str
 
 
 def null_rank_rates(cfg: dict[str, Any], n_frames: int = 200, seed: int = 0) -> dict[str, float]:
-    """No-effect check: n_frames synthetic card_direct tables with four IDENTICAL groups (NULL_PLANTS
-    plants x NULL_WINDOWS windows, true g_s NULL_GS_MOL with plant and window noise); share of frames
-    with p < 0.05 for each rank test. Expected near 0.05 (exact Mann-Whitney is discrete). Reported only."""
+    """No-effect check: n_frames synthetic card_direct tables with four IDENTICAL groups
+    (dry_run.null_check: n_plants x n_windows, true g_s gs_mol with plant_sd_mol and window_sd_mol
+    noise, all invented); share of frames with p < alpha for each rank test. Expected near alpha
+    (exact Mann-Whitney is discrete). Reported only."""
+    nc = cfg["dry_run"]["null_check"]
     from analysis import genotype_comparison as gc
     oc = next(o for o in gc.outcomes(cfg) if o.role == "primary")
     rng = np.random.default_rng(seed)
@@ -454,17 +454,17 @@ def null_rank_rates(cfg: dict[str, Any], n_frames: int = 200, seed: int = 0) -> 
         rows = []
         for g in genos:
             for t in trts:
-                for p in range(NULL_PLANTS):
-                    mu = NULL_GS_MOL + rng.normal(0, NULL_PLANT_SD)
-                    for _w in range(NULL_WINDOWS):
+                for p in range(int(nc["n_plants"])):
+                    mu = float(nc["gs_mol"]) + rng.normal(0, float(nc["plant_sd_mol"]))
+                    for _w in range(int(nc["n_windows"])):
                         rows.append({"plant_id": f"{g}-{t}-{p}", "genotype": g, "water_treatment": t, "block": "",
                                      "method": oc.method, "valid": True, "reason": "ok", "censor": "none",
-                                     "g_s_mol": mu + rng.normal(0, NULL_WINDOW_SD), "g_s_mol_dl": math.nan,
+                                     "g_s_mol": mu + rng.normal(0, float(nc["window_sd_mol"])), "g_s_mol_dl": math.nan,
                                      "convection_regime": "forced"})
         w, _ = gc.prepare(pd.DataFrame(rows), oc, campaign_dl=None)
         for _, r in gc.rank_tests(w, cfg, rng).iterrows():
             name = "kruskal_wallis" if r["test"].startswith("kruskal") else r["test"]
-            hits[name] = hits.get(name, 0) + int(r["p_value"] < 0.05)
+            hits[name] = hits.get(name, 0) + int(r["p_value"] < float(nc["alpha"]))
     return {"n_frames": n_frames, **{k: v / n_frames for k, v in hits.items()}}
 
 

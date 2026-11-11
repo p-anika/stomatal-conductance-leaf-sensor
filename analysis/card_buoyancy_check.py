@@ -72,6 +72,7 @@ def absorbed_shortwave_wm2(df: pd.DataFrame, cfg: dict[str, Any], cal: dict[str,
     """SW_abs = a_s_card x c_card x k(light source) x lux  [W m-2] (Appendix A eqs. 1-2)."""
     a_s, _ = card_absorptivity(cfg, cal)
     k = df["light_source"].map(lambda s: get_light_source(cfg, cal, str(s)).k_wm2_per_lux)
+    # a blank c_card becomes 1.0 and the group is flagged c_position_default (see run)
     c = pd.to_numeric(df["c_card"], errors="coerce").fillna(1.0)
     return a_s * c * k * pd.to_numeric(df["lux"], errors="coerce")
 
@@ -138,7 +139,7 @@ COLUMNS = ("card_id", "shape_group", "wind_setting_ms", "status", "n_windows", "
            "dt_slope", "dt_slope_lo", "dt_slope_hi", "median_delta_t_card_c", "mean_r_bh_s_m",
            "nusselt_a_m_s", "nusselt_b_m_s_per_c4", "frac_change_fit", "frac_change_fit_lo", "frac_change_fit_hi",
            "frac_change_fit_low", "frac_change_model", "frac_change_model_low", "max_change",
-           "card_transfer_unreliable")
+           "card_transfer_unreliable", "flags")
 
 
 def run(training: pd.DataFrame, cfg: dict[str, Any], cal: dict[str, Any], label: str) -> pd.DataFrame:
@@ -153,8 +154,9 @@ def run(training: pd.DataFrame, cfg: dict[str, Any], cal: dict[str, Any], label:
         df["sw_abs_wm2"] = absorbed_shortwave_wm2(df, cfg, cal)
         df["wind_setting_ms"] = wind_settings(df, float(cb["wind_setting_step_ms"]))
         for (card, wind), g in df.groupby(["card_id", "wind_setting_ms"]):
+            blank_c = pd.to_numeric(g["c_card"], errors="coerce").isna().any()
             rows.append({"card_id": card, "shape_group": g["shape_group"].iloc[0], "wind_setting_ms": wind,
-                         **check_group(g, cfg, rng)})
+                         **check_group(g, cfg, rng), "flags": "c_position_default" if blank_c else ""})
     out = pd.DataFrame(rows, columns=list(COLUMNS))
     out["card_transfer_unreliable"] = out["card_transfer_unreliable"].astype(object)
     out["data_label"] = label

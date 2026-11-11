@@ -16,8 +16,14 @@ from the card in that draw instead of drawn from a lognormal (eq. 9):
     T_card = T_card_meas + sigma_leaf z1                      (same z1 as the leaf)
     Rn_card = Rn(T_card, eq. 2, card a_s, emissivity, c_card) x (1 + sigma_rn_card z6)
     r_bH   = rho cp (T_card - T_air) / Rn_card                (same T_air draw as the leaf)
-Draws whose card r_bH is <= 0 or whose |Rn_card| < min_abs_rn_wm2 are dropped (counted).
+Draws whose card r_bH is <= 0 or whose |Rn_card| < min_abs_rn_wm2 are UNUSABLE (fixed after the
+2026-11-11 review: they were dropped before). They are kept with status UNUSABLE and no g_s,
+count as NOT usable in the "frac_ok >= dl_min_resolved_fraction" test, and are counted
+(n_draws_unusable). If every draw is unusable the window is unresolved with no interval.
 With the key false (or no card), r_bH = r_bH_meas x exp(sigma_rb z5) exactly as before.
+
+Normal r_bH draws (Sigmas.rb_distribution = "normal", used for ml_corrected, whose interval is
+Gaussian in f): r_bH = r_bH_meas x (1 + sigma_rb z5); draws with r_bH <= 0 are UNUSABLE as above.
 
 Draw outcomes and the value used for percentiles (mol m-2 s-1). EVERY draw is used:
     lambdaE <= 0  -> 0 (closed stomata)
@@ -68,11 +74,13 @@ from processing.physics_baseline import (
     solve_card_rbh,
 )
 
-# Per-draw status codes.
-OK, BELOW, ABOVE = 0, 1, 2
+# Per-draw status codes. UNUSABLE: the draw has no valid r_bH (card r_bH <= 0, |Rn_card| too small,
+# or a normal r_bH draw <= 0); it has no g_s and counts as not usable.
+OK, BELOW, ABOVE, UNUSABLE = 0, 1, 2, 3
 
 # Percentiles: 2.5 / 50 / 97.5 for the 95 % interval; 15.87 / 84.13 are +-1 sigma of a normal.
 _P_LO, _P_MID, _P_HI = 2.5, 50.0, 97.5
+INTERVAL_LEVEL = (_P_HI - _P_LO) / 100.0      # coverage of every Monte Carlo interval here (0.95)
 _P_M1, _P_P1 = 15.87, 84.13
 # Search span for the forward leaf temperature (deg C either side of air); numerical only.
 _FORWARD_SPAN_C = 40.0
@@ -92,6 +100,7 @@ class Sigmas:
     rn_card_fraction: float
     rho_leaf_air: float
     sources: tuple[tuple[str, str], ...]
+    rb_distribution: str = "lognormal"     # "normal" for ml_corrected (Gaussian in f), T5.1 review fix
 
     @property
     def placeholder(self) -> bool:
@@ -214,7 +223,11 @@ def _draw_at(t_leaf_c: float, reading: LeafReading, e_s_wm2: float, a_s: float,
         s.rho_leaf_air * z[0] + math.sqrt(1.0 - s.rho_leaf_air ** 2) * z[1])
     rh = np.clip(reading.relative_humidity_pct + s.rh_pct * z[2], 0.0, 100.0)
     e_s = e_s_wm2 * np.exp(s.lux_fraction * z[3])
-    if card is None:
+    usable = np.ones(n, dtype=bool)
+    if card is None and s.rb_distribution == "normal":
+        r_bh = reading.r_bh * (1.0 + s.rb_fraction * z[4])
+        usable = r_bh > 0
+    elif card is None:
         r_bh = reading.r_bh * np.exp(s.rb_fraction * z[4])
     else:
         # one camera, one air thermometer: the card shares z1 and the T_air draw (A43)
@@ -226,12 +239,15 @@ def _draw_at(t_leaf_c: float, reading: LeafReading, e_s_wm2: float, a_s: float,
                                  phys["faces"], lw, cfg) * (1.0 + s.rn_card_fraction * rng.standard_normal(n))
         with np.errstate(divide="ignore", invalid="ignore"):
             r_bh = rho_cp_j_m3_k(cfg) * (t_card - t_air) / rn_c
-        keep = (r_bh > 0) & (np.abs(rn_c) >= phys["min_abs_rn_wm2"])
-        t_leaf, t_air, rh, e_s, r_bh = t_leaf[keep], t_air[keep], rh[keep], e_s[keep], r_bh[keep]
+        usable = (r_bh > 0) & (np.abs(rn_c) >= phys["min_abs_rn_wm2"])
+    # unusable draws are KEPT (status UNUSABLE, no g_s); a safe r_bH stops the solver dividing by <= 0
+    r_safe = np.where(usable, r_bh, reading.r_bh)
     out = solve_core(t_leaf, t_air, reading.surroundings_temp_c, rh, reading.pressure_hpa,
-                     e_s, a_s, r_bh, cfg)
-    return GsDraws(t_leaf, t_air, rh, e_s, r_bh, out["latent"], out["vpd"], out["g_mol"],
-                   out["status"])
+                     e_s, a_s, r_safe, cfg)
+    status = np.where(usable, out["status"], UNUSABLE)
+    g_mol = np.where(usable, out["g_mol"], np.nan)
+    return GsDraws(t_leaf, t_air, rh, e_s, np.where(usable, r_bh, np.nan), out["latent"], out["vpd"], g_mol,
+                   status)
 
 
 def gs_draws(reading: LeafReading, cfg: dict[str, Any], cal: dict[str, Any],
@@ -252,22 +268,29 @@ class _Summary:
     frac_ok: float
     rel_width: float
     resolved: bool
+    n_unusable: int = 0
 
 
 def _summarise(d: GsDraws, cfg: dict[str, Any]) -> _Summary:
     unc = cfg["uncertainty"]
     cap = float(unc["g_s_cap_mol"])
     st = d.status
+    # Every draw counts in the usable fraction; UNUSABLE draws count as not usable.
     frac_ok = float(np.mean(st == OK))
-    # No draw is excluded: dropping any outcome would truncate the interval.
-    values = np.where(st == BELOW, 0.0, np.where(st == ABOVE, cap, np.minimum(d.g_mol, cap)))
+    n_unusable = int(np.sum(st == UNUSABLE))
+    has_value = st != UNUSABLE
+    if not has_value.any():
+        return _Summary(None, None, None, frac_ok, math.inf, False, n_unusable)
+    # Percentiles over the draws that have a value: censored draws are held at 0 or the cap,
+    # so no outcome is truncated; UNUSABLE draws have no g_s at all.
+    values = np.where(st == BELOW, 0.0, np.where(st == ABOVE, cap, np.minimum(d.g_mol, cap)))[has_value]
     lo, med, hi = (float(v) for v in np.percentile(values, [_P_LO, _P_MID, _P_HI]))
     rel_width = (hi - lo) / med if med > 0 else math.inf
     # An upper bound at the cap means "not bounded above", so it can never count as
     # resolved; otherwise capping would shrink the width and fake a resolved value.
     resolved = (frac_ok >= unc["dl_min_resolved_fraction"]
                 and rel_width < unc["max_relative_width"] and hi < cap)
-    return _Summary(lo, med, hi, frac_ok, rel_width, resolved)
+    return _Summary(lo, med, hi, frac_ok, rel_width, resolved, n_unusable)
 
 
 # ---------------------------------------------------------------- detection limit
@@ -373,6 +396,8 @@ class GsUncertainty:
     dl_grid_no_root of the dl_grid_points grid values had no forward leaf temperature.
     If it is above 0, g_s_mol_dl = None may mean the search failed, not "nothing resolved".
     frac_vpd_nonpositive is a diagnostic: those draws are kept (held at the cap or at 0).
+    n_draws_unusable: draws with no valid r_bH (kept, counted as not usable); all_draws_unusable:
+    every draw was unusable, so there is no interval and the window is unresolved.
     """
     valid: bool
     reason: str
@@ -393,6 +418,8 @@ class GsUncertainty:
     seed: int
     sigmas: Sigmas | None
     sigma_placeholder: bool
+    n_draws_unusable: int = 0
+    all_draws_unusable: bool = False
 
 
 def gs_uncertainty(reading: LeafReading, cfg: dict[str, Any], cal: dict[str, Any],
@@ -425,7 +452,8 @@ def gs_uncertainty(reading: LeafReading, cfg: dict[str, Any], cal: dict[str, Any
         frac_vpd_nonpositive=float(np.mean(d.vpd <= 0)),
         frac_resolved=sm.frac_ok, relative_width=sm.rel_width, resolved=sm.resolved,
         g_s_mol_dl=dl, dl_grid_points=n_grid, dl_grid_no_root=no_root,
-        n_draws=n, seed=seed, sigmas=s, sigma_placeholder=s.placeholder)
+        n_draws=n, seed=seed, sigmas=s, sigma_placeholder=s.placeholder,
+        n_draws_unusable=sm.n_unusable, all_draws_unusable=sm.n_unusable == n)
 
 
 def attach_uncertainty(result: ConductanceResult, unc: GsUncertainty) -> ConductanceResult:
