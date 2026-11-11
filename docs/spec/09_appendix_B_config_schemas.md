@@ -91,6 +91,8 @@ windows:
   stability_slope_c_per_min: 0.05
   min_acclimation_minutes: 30
   card_match_minutes: 10
+  card_source: session_pooled            # T5.1 (2026-11-11): one pooled card r_bH per session; nearest_window = old rule
+  wind_variation_max_frac: 0.2          # PLACEHOLDER: flag wind_varies_in_session above this (max - min) / median wind
   max_photo_gap_sec: 120                # photo-to-window join (B15)
   leaf_moved_range_frac: 0.05           # leaf_moved when (max - min) / median of d_min over the session's photos exceeds this (T3.4)
   acclimation_reset_label: lamp_on      # events.csv label that restarts the light-acclimation clock (T3.4)
@@ -169,6 +171,18 @@ dry_run:                                # T6.1; processing/pipeline_dry_run.py o
   fast: {ml: {n_bootstrap: 50, forest_n_estimators: 50}}   # detection-limit settings are NOT reduced
   overrides: {uncertainty: {card_leaf_shared_draws: true}} # applied in every dry run
   null_check: {gs_mol: 0.40, plant_sd_mol: 0.03, window_sd_mol: 0.03, n_plants: 5, n_windows: 6, alpha: 0.05}   # no-effect check, INVENTED
+card_selection_bias:                    # analysis/card_selection_bias.py only (2026-11-11). INVENTED
+  shape_seed: 0
+  n_plants: 10                          # per group
+  g_s_mol: 0.30
+  g_s_drought_mol: 0.15                 # planted-effect design
+  low_irradiance_wm2: 60.0
+  high_irradiance_wm2: 150.0
+  wind_ms: 0.8
+  duration_min: 8.0
+  sigmas_c: [0.2, 0.5, 1.0]             # shared thermal offset sigmas and +/- fixed offsets
+  n_draws: 200                          # point estimates only
+  dl_grid_points: 10
 card_buoyancy:                          # T5.9; threshold is convection.card_transfer_max_change
   leaf_delta_t_c: 1.0                   # leaf-like |T - T_air| that DECIDES card_transfer_unreliable (pre-registered)
   leaf_delta_t_low_c: 0.5               # also reported (= convection.min_grashof_delta_t_c floor)
