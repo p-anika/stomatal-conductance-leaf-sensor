@@ -134,6 +134,28 @@ segmentation:                           # Added in T3.1 (2026-11-09). ALL PLACEH
   min_contrast: 30.0                    # mean ExG (leaf) or darkness (card) inside minus outside the mask, colour levels
 sensors:
   fs3000: {enabled: false, variant: 1005}
+  # Added 2026-11-11 (T7.1/M1, decision_log). FS3000-1005 count -> m/s from the Renesas FS3000 datasheet
+  # (REN_FS3000_DST_20220531.pdf, R36DS0009EU0100 Rev.1.00, Figure 2 table). OWNER: confirm visually against the PDF.
+  # No 1015 table on purpose. Linear interpolation between points is an ASSUMPTION; <= 409 -> 0 m/s; > 3686 -> overflow.
+  # Accuracy 5 % of full scale (about +/- 0.36 m/s for the 1005).
+  fs3000_table_1005: {counts: [409, 915, 1522, 2066, 2523, 2908, 3256, 3572, 3686],
+                      wind_ms: [0.0, 1.07, 2.01, 3.00, 3.97, 4.96, 5.98, 6.99, 7.23]}
+  fs3000_i2c_address: 0x28               # datasheet 5.1.1; confirm with i2cdetect
+  bme280: {enabled: true}
+  tsl2591: {enabled: true, start_gain: high, allow_max_gain: false}   # T7.1: step down only (high -> medium -> low)
+  mlx90640_max_retries: 5                # T7.1: retry getFrame on ValueError
+  # Simulated sensors (T7.1/M2). INVENTED values, only for laptop runs and tests.
+  simulated:
+    air_temp_c: 24.0
+    humidity_pct: 50.0
+    pressure_hpa: 995.0
+    noise_sd: {air_temp_c: 0.05, humidity_pct: 0.5, pressure_hpa: 0.1, lux_fraction: 0.01, wind_ms: 0.05, pixel_c: 0.1}
+    lux_by_light_source: {led_lamp: 12000.0, window: 20000.0, sunlight: 60000.0}
+    wind_ms_by_fan_state: {"off": [0.0, 0.05], low: [0.5, 1.0], high: [1.5, 3.0]}   # [low, high] range; mean = midpoint
+    leaf_offset_c: -1.0                  # simulated leaf block relative to air
+    card_offset_c: 2.5                   # simulated card block relative to air
+    leaf_block: [8, 16, 10, 20]          # rows [start, stop), cols [start, stop) in the 24 x 32 frame
+    card_block: [2, 6, 24, 30]
   arducam: {enabled: false, working_distance_mm: null, lens_position: null, resolution: [2304, 1296]}
   # Added in T3.2 (2026-11-09): field of view from Adafruit's 55 x 35 deg product listing;
   # confirm by imaging a known-size warm object at T7.4.

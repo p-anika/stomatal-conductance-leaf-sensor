@@ -1,6 +1,7 @@
 # Raspberry Pi hardware libraries (T0.3). Install on the Pi only.
 # picamera2 comes from apt (sudo apt install python3-picamera2), not pip.
-# FS3000 wind sensor library will be added when that sensor arrives.
+# FS3000 (T7.1, 2026-11-11): smbus2 for the raw datasheet read; the SparkFun library is used only by
+# hardware_tests/test_fs3000.py to compare (package name UNVERIFIED).
 # Not pinned yet: pin after the first clean install on the Pi (Pi Python version still unchecked).
 adafruit-circuitpython-bme280
 adafruit-circuitpython-tsl2591
@@ -8,3 +9,5 @@ adafruit-circuitpython-mlx90640
 adafruit-blinka
 numpy
 pyyaml
+smbus2
+# sparkfun-qwiic-fs3000  (install separately, see docs/pi_first_run_checklist.md; the name is UNVERIFIED and a wrong name would stop this whole file)
