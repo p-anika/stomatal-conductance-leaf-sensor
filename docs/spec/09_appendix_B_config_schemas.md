@@ -122,6 +122,7 @@ uncertainty:
   n_draws: 2000
   max_relative_width: 1.0
   dl_min_resolved_fraction: 0.9         # detection limit definition (A15)
+  card_leaf_shared_draws: false         # T6.1, A43: true = card and leaf share the thermal and air draws, card r_bH re-solved per draw
 ml:
   min_shapes: 10
   min_improvement: 0.05
@@ -147,6 +148,34 @@ genotype_comparison:                    # T5.3
   random_seed: 0
   censor_substitution: {zero: 0.0, half_dl: 0.5, dl: 1.0}   # below_detection -> fraction x detection limit; above_range -> uncertainty.g_s_cap_mol
   primary_substitution: half_dl         # a conclusion is robust only if it holds under every substitution
+dry_run:                                # T6.1; processing/pipeline_dry_run.py only. Planted values are INVENTED
+  max_runtime_s: 300                    # was 120 s (fast settings); timing is machine-dependent
+  n_plants_per_group: 5
+  plant_sd_fraction: 0.10
+  true_gs_mol:                          # per genotype (enumerations.genotype order), mol m-2 s-1
+    - {well_watered: 0.40, drought_stressed: 0.004}
+    - {well_watered: 0.40, drought_stressed: 0.24}
+  min_first_genotype_drop_pct: 85.0     # check (c)
+  card_winds_ms: [0.8, 2.0]
+  card_irradiance_wm2: 400.0
+  leaf_wind_ms: 0.8
+  leaf_duration_min: 8.0
+  target_sigmas: {sigma_leaf_temp_c: 0.2, sigma_lux_fraction: 0.05}   # "if this calibration is achieved", not measured
+  air_rh_scenarios:                     # --air-rh; added to target_sigmas (relaxed also sets the leaf)
+    placeholder:  {sigma_air_temp_c: 0.5, sigma_rh_pct: 3.0}
+    intermediate: {sigma_air_temp_c: 0.3, sigma_rh_pct: 2.5}
+    target:       {sigma_air_temp_c: 0.2, sigma_rh_pct: 2.0}   # 2 % RH may not be achievable (BME280 figure UNVERIFIED)
+    relaxed:      {sigma_leaf_temp_c: 0.4, sigma_air_temp_c: 0.3, sigma_rh_pct: 3.0}
+  fast: {ml: {n_bootstrap: 50, forest_n_estimators: 50}}   # detection-limit settings are NOT reduced
+  overrides: {uncertainty: {card_leaf_shared_draws: true}} # applied in every dry run
+card_buoyancy:                          # T5.9; threshold is convection.card_transfer_max_change
+  leaf_delta_t_c: 1.0                   # leaf-like |T - T_air| that DECIDES card_transfer_unreliable (pre-registered)
+  leaf_delta_t_low_c: 0.5               # also reported (= convection.min_grashof_delta_t_c floor)
+  min_lamp_levels: 3                    # distinct lamp levels (sessions) per card shape x wind setting
+  wind_setting_step_ms: 0.1             # session median wind rounded to this to define a wind setting
+  ci_level: 0.95
+  n_param_draws: 2000                   # draws of the fitted (a, b) for the fractional-change interval
+  random_seed: 0
 synthetic:                              # T4.2; used only by ml/synthetic_data.py. EVERY VALUE IS INVENTED (not a measurement or calibration)
   k_wm2_per_lux: 0.01                   # only in a returned synthetic calibration dict; light_sources.led_lamp k stays null
   a_s_card: 0.95
