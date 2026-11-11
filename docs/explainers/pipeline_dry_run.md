@@ -409,6 +409,41 @@ seed 0). Both give the same numbers:
 The ML relative spread here is small (sd_f / f̂ about 0.05–0.1), so the two distributions barely
 differ. They would differ only for a wide ML interval.
 
+### Run 6 (2026-11-11): session-pooled card r_bH (option C), before → after, seeds 0–4
+card_direct now uses one pooled card r_bH per session (see `card_selection_bias.md`). "Before" is
+run 5 (unchanged above). No threshold or scenario changed.
+
+| Scenario | Seed | c | d | exit | campaign DL | card_direct rows with a DL | resolved rows | first-genotype drop | difference of drops |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| target | 0 | PASS → PASS | PASS → PASS | 0 → 0 | 0.118 → 0.118 | 1.00 → 1.00 | 267 → 267 | 90.9 → 91.1 % | −59.1 → −59.2 |
+| target | 1 | PASS → PASS | PASS → PASS | 0 → 0 | 0.118 → 0.118 | **0.92 → 0.90** | 258 → 258 | 93.4 → 92.7 % | −43.7 → −42.9 |
+| target | 2 | PASS → PASS | PASS → PASS | 0 → 0 | 0.118 → 0.118 | 1.00 → 1.00 | 270 → 270 | 91.9 → 92.0 % | −51.2 → −51.3 |
+| target | 3 | PASS → PASS | PASS → PASS | 0 → 0 | 0.118 → 0.118 | 0.95 → 0.95 | 261 → 261 | 91.1 → 91.0 % | −50.9 → −50.8 |
+| target | 4 | PASS → PASS | PASS → PASS | 0 → 0 | 0.103 → 0.103 | 0.95 → 0.95 | 264 → 264 | 92.3 → 92.3 % | −39.3 → −39.3 |
+| intermediate | 0 | FAIL → FAIL | PASS → PASS | 1 → 1 | 0.152 → 0.152 | **0.81 → 0.80** | 264 → 266 | 81.7 → 81.7 % | −49.8 → −49.8 |
+| intermediate | 1 | PASS → PASS | PASS → PASS | 0 → 0 | 0.152 → 0.152 | 0.69 → 0.70 | 236 → 239 | 88.8 → 88.8 % | −39.1 → −39.2 |
+| intermediate | 2 | PASS → PASS | PASS → PASS | 0 → 0 | 0.173 → 0.173 | 0.71 → 0.71 | **233 → 231** | 89.0 → 89.0 % | −48.8 → −48.8 |
+| intermediate | 3 | FAIL → FAIL | PASS → PASS | 1 → 1 | 0.152 → 0.152 | **0.73 → 0.71** | 248 → 249 | 83.8 → 83.8 % | −41.0 → −41.0 |
+| intermediate | 4 | PASS → PASS | PASS → PASS | 0 → 0 | **0.134 → 0.152** | **0.81 → 0.80** | 234 → 234 | 89.8 → 89.8 % | −31.9 → −31.9 |
+| relaxed | 0 | FAIL → FAIL | FAIL → FAIL | 1 → 1 | none → none | 0.02 → 0.02 | 15 → 16 | – | – |
+| relaxed | 1 | FAIL → FAIL | FAIL → FAIL | 1 → 1 | none → none | 0.00 → 0.00 | 6 → 6 | – | – |
+| relaxed | 2 | not evaluated | not evaluated | 0 → 0 | none → none | 0.00 → 0.00 | 0 → 0 | – | – |
+| relaxed | 3 | FAIL → FAIL | FAIL → FAIL | 1 → 1 | none → none | 0.09 → 0.10 | 8 → 8 | – | – |
+| relaxed | 4 | FAIL → FAIL | FAIL → FAIL | 1 → 1 | none → none | 0.00 → 0.01 | 7 → 7 | – | – |
+
+- **No check result changed in any of the 15 runs,** and check b passed (or was not evaluated)
+  as before.
+- **No session became `suspect_card_rbh`, and no `wind_varies_in_session` flag was set.** The
+  dry-run leaf sessions run at 120 W m⁻², where the card is well above air.
+- **The card_direct r_bH error barely moved:** relative RMSE on atypical leaves at most 0.001
+  different, and plant-level g_s RMSE at most 0.003 different.
+- **Slightly worse** (bold above):
+  - intermediate seed 4's campaign detection limit rose from 0.134 to 0.152
+  - the share of card_direct rows with a detection limit fell by 0.01–0.02 in four runs
+  - intermediate seed 2 has 2 fewer resolved rows
+- **Slightly better:** intermediate seeds 0, 1 and 3 and relaxed seed 0 gained 1–3 resolved rows.
+- **Runtime:** 30–62 s, against 26–43 s in run 5. This is machine timing, as before.
+
 ## Findings
 1. **ML corrects r_bH on unusual leaf shapes.** On seeds 0–4 its r_bH error is 5–16 %, against
    about 30 % for the flat plate. Without per-session offsets it also has 1.7–8 times lower g_s

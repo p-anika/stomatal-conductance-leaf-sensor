@@ -109,7 +109,11 @@ windows:
   stability_minutes: 3
   stability_slope_c_per_min: 0.05
   min_acclimation_minutes: 30
-  card_match_minutes: 10
+  card_match_minutes: 10                # used only with card_source: nearest_window
+  # Added 2026-11-11 (decision_log, option C): card_direct uses ONE session-pooled card r_bH (ratio of sums
+  # over all steady, light-gated card windows, including delta T <= 0). nearest_window = the old rule.
+  card_source: session_pooled
+  wind_variation_max_frac: 0.2          # PLACEHOLDER: flag wind_varies_in_session when (max-min)/median wind > this
   max_photo_gap_sec: 120                # photo-to-window join (B15)
   # Changed in T3.4 (2026-11-09, decision_log): was leaf_moved_cv. Owner chose a range test:
   # flag leaf_moved when (max - min) / median of d_min_mm over the session's ok photos exceeds this.
@@ -219,6 +223,18 @@ dry_run:                                # Added in T6.1 (2026-11-10, see decisio
   overrides: {uncertainty: {card_leaf_shared_draws: true}}
   # No-effect check of the rank tests (T6.1 diagnostic). Moved from code 2026-11-11 (review). INVENTED values.
   null_check: {gs_mol: 0.40, plant_sd_mol: 0.03, window_sd_mol: 0.03, n_plants: 5, n_windows: 6, alpha: 0.05}
+card_selection_bias:                    # Added 2026-11-11 (decision_log design row). analysis/card_selection_bias.py ONLY. INVENTED.
+  shape_seed: 0
+  n_plants: 10                          # per group
+  g_s_mol: 0.30
+  g_s_drought_mol: 0.15                 # planted-effect design (50 % drop)
+  low_irradiance_wm2: 60.0              # card absorbed about 57 W m-2 (gate 40)
+  high_irradiance_wm2: 150.0            # light-difference design, group 2
+  wind_ms: 0.8
+  duration_min: 8.0
+  sigmas_c: [0.2, 0.5, 1.0]             # shared thermal offset sigma (random design) and +/- fixed offsets
+  n_draws: 200                          # point estimates only are measured
+  dl_grid_points: 10
 card_buoyancy:                          # Added in T5.9 (2026-11-10, see decision_log); threshold is convection.card_transfer_max_change
   leaf_delta_t_c: 1.0                   # leaf-like |T - T_air| that DECIDES card_transfer_unreliable (pre-registered)
   leaf_delta_t_low_c: 0.5               # also reported (= convection.min_grashof_delta_t_c floor)

@@ -182,18 +182,78 @@ def card_windows(session: Session, cfg: dict[str, Any], cal: dict[str, Any]) -> 
         rec: dict[str, Any] = {"centre": start + (end - start) / 2, "card_id": card_id, "valid": False,
                                "reason": str(w["reason"]), "r_bh": None, "r_bh_lo": None, "r_bh_hi": None,
                                "card_temp_c": _num(w.get(CARD_TEMP)), "air_temp_c": _num(w.get("air_temp_c")),
-                               "flags": []}
+                               "lux": _num(w.get("lux")), "rn_wm2": math.nan, "pool_ok": False,
+                               "light_source": str(meta.get("light_source")), "flags": []}
         if rec["reason"] == "ok":
             reading = ReferenceCardReading(card_id=card_id, card_temp_c=rec["card_temp_c"],
                                            air_temp_c=rec["air_temp_c"], surroundings_temp_c=rec["air_temp_c"],
                                            lux=_num(w.get("lux")), light_source=str(meta.get("light_source")))
             res = solve_card_rbh(reading, cfg, cal)
-            rec.update(valid=res.valid, reason=res.reason, flags=list(res.flags))
+            rec.update(valid=res.valid, reason=res.reason, flags=list(res.flags),
+                       rn_wm2=_num(res.rn_wm2),
+                       # pooled card r_bH (option C): steady and light-gated only, NEVER chosen on delta T
+                       pool_ok=res.reason in ("ok", "suspect_card_rbh", "rn_near_zero"))
             if res.valid:
                 cu = card_rbh_uncertainty(reading, cfg, cal, n=n, seed=0)
                 rec.update(r_bh=res.r_bh, r_bh_lo=cu.r_bh_lo, r_bh_hi=cu.r_bh_hi, reading=reading)
         out.append(rec)
     return out
+
+
+def pooled_card_rbh(card_wins: list[dict[str, Any]], cfg: dict[str, Any]) -> tuple[float | None, str, int]:
+    """Session card r_bH pooled in flux space (option C, decision_log 2026-11-11):
+
+        r_bH,session = rho cp x sum(T_card - T_air) / sum(Rn_card)        [s m-1]  (eq. 9 on sums)
+
+    over every card window with pool_ok (steady AND light-gated; windows with delta T <= 0 or a
+    small Rn are INCLUDED, so nothing is chosen on the measured result). Returns (r_bH or None,
+    reason, windows used): ok; suspect_card_rbh if the pooled value is <= 0 (kept and counted);
+    rn_near_zero if |mean Rn| < min_abs_rn_wm2; missing_input if no window qualifies."""
+    used = [w for w in card_wins if w.get("pool_ok") and all(math.isfinite(_num(w.get(k)))
+                                                            for k in ("card_temp_c", "air_temp_c", "rn_wm2"))]
+    if not used:
+        return None, "missing_input", 0
+    sum_dt = sum(_num(w["card_temp_c"]) - _num(w["air_temp_c"]) for w in used)
+    sum_rn = sum(_num(w["rn_wm2"]) for w in used)
+    if abs(sum_rn / len(used)) < float(cfg["physics"]["min_abs_rn_wm2"]):
+        return None, "rn_near_zero", len(used)
+    r = ebu.rho_cp_j_m3_k(cfg) * sum_dt / sum_rn
+    return r, ("ok" if r > 0 else "suspect_card_rbh"), len(used)
+
+
+def session_card(card_wins: list[dict[str, Any]], cfg: dict[str, Any], cal: dict[str, Any]) -> dict[str, Any] | None:
+    """One card record for the whole session (same keys as a card_windows record). r_bH from
+    pooled_card_rbh; its interval from the card Monte Carlo at the session-mean reading (the
+    sigmas are calibration errors, which do not average out); reading = the session-mean card
+    reading (for the A43 shared draws). None if the session has no card windows at all."""
+    if not card_wins:
+        return None
+    r, reason, n = pooled_card_rbh(card_wins, cfg)
+    used = [w for w in card_wins if w.get("pool_ok")]
+    out: dict[str, Any] = {"card_id": card_wins[0]["card_id"], "valid": reason == "ok", "reason": reason,
+                           "r_bh": r if reason == "ok" else None, "r_bh_lo": None, "r_bh_hi": None,
+                           "card_temp_c": math.nan, "air_temp_c": math.nan, "n_windows": n,
+                           "flags": list(dict.fromkeys(f for w in used for f in w["flags"]))}
+    if not used:
+        return out
+    mean = lambda k: float(np.mean([_num(w[k]) for w in used]))
+    reading = ReferenceCardReading(card_id=out["card_id"], card_temp_c=mean("card_temp_c"),
+                                   air_temp_c=mean("air_temp_c"), surroundings_temp_c=mean("air_temp_c"),
+                                   lux=mean("lux"), light_source=used[0]["light_source"])
+    out.update(card_temp_c=reading.card_temp_c, air_temp_c=reading.air_temp_c, reading=reading)
+    if out["valid"]:
+        cu = card_rbh_uncertainty(reading, cfg, cal, n=int(cfg["uncertainty"]["n_draws"]), seed=0)
+        if cu.valid:
+            out.update(r_bh_lo=cu.r_bh_lo, r_bh_hi=cu.r_bh_hi)
+    return out
+
+
+def wind_varies(wins: pd.DataFrame, max_frac: float) -> bool:
+    """(max - min) / median of the steady windows' mean wind_ms > max_frac (session-level card r_bH
+    assumes one wind setting)."""
+    w = pd.to_numeric(wins.loc[wins["steady_state"].astype(bool), "wind_ms"], errors="coerce").dropna() \
+        if "wind_ms" in wins else pd.Series(dtype=float)
+    return bool(len(w) >= 2 and w.median() > 0 and (w.max() - w.min()) / w.median() > max_frac)
 
 
 def match_card(cards: list[dict[str, Any]], centre: pd.Timestamp, max_minutes: float) -> dict[str, Any] | None:
@@ -241,6 +301,10 @@ def session_results(session: Session, photo_features: pd.DataFrame | None, cards
     wins = build_windows(session.sensor, session.events, meta, cfg, photo_features=photo_features)
     card_wins = card_windows(session, cfg, cal)
     max_min = float(cfg["windows"]["card_match_minutes"])
+    # option C (decision_log 2026-11-11): one pooled card r_bH per session; "nearest_window" = old rule
+    card_source = cfg["windows"].get("card_source", "session_pooled")
+    sess_card = session_card(card_wins, cfg, cal) if card_source == "session_pooled" else None
+    wind_flag = ["wind_varies_in_session"] if wind_varies(wins, float(cfg["windows"]["wind_variation_max_frac"])) else []
     d_col = f"{cfg['physics']['characteristic_dimension']}_mm"
     card_ref = cards.get(str(meta.get("card_id") or "").strip())
     base_sigmas = get_sigmas(cfg, cal, get_light_source(cfg, cal, light_source))
@@ -283,7 +347,8 @@ def session_results(session: Session, photo_features: pd.DataFrame | None, cards
             if method == "card_direct":
                 reason = "" if win_reason in ("ok", NO_PHOTO) else win_reason
                 if not reason:
-                    card = match_card(card_wins, centre, max_min)
+                    card = sess_card if card_source == "session_pooled" else match_card(card_wins, centre, max_min)
+                    flags += wind_flag
                     if card is None:
                         reason = "missing_input"          # no card in this session or none in time
                     elif not card["valid"]:

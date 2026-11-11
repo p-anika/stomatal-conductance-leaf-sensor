@@ -94,6 +94,18 @@ The roles of the three methods were fixed before data collection. Uncertainty wa
   *normal*, because the ML interval is Gaussian in f. If the interval's lower end f_lo ≤ 0, the
   flat-plate placeholder spread is used and the row is flagged `rb_sigma_fallback`.
 
+## card_direct uses one card r_bH per session (changed 2026-11-11)
+- **What changed.** card_direct no longer takes the nearest valid card window. It uses one card
+  r_bH per session: ρc_p × Σ(T_card − T_air) / Σ Rn_card, over every steady, light-gated card
+  window, *including* windows where the card read at or below air temperature.
+- **Why.** The old rule skipped card windows that read low. The card and the leaf share the
+  camera's offset, so that quietly chose data on a measured result.
+- **If the pooled value is ≤ 0,** the session's card_direct rows are kept, labelled
+  `suspect_card_rbh`, and counted per group in the T5.3 table.
+- **Flag `wind_varies_in_session`:** the session's wind changed by more than 20 % (placeholder),
+  so one r_bH per session is doubtful.
+- **Details and the synthetic test** are in `card_selection_bias.md`.
+
 ## Limitations
 - **Shared camera error (open item, A43).** The leaf and the card are read by the same thermal camera. Part of their temperature error is therefore shared, and in card_direct it partly cancels. The Monte Carlo treats the card's r_bH interval and the leaf temperature as independent, so card_direct intervals are **probably too wide (conservative)**. Fix: draw the card and leaf temperature errors together (correlated draws).
 - **flat_plate interval too small:** σ_rb = 0.2 against a possible 3× error (decision 20).

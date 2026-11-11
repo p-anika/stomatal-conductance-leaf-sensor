@@ -361,12 +361,16 @@ def excluded_by_group(results: pd.DataFrame, oc: Outcome) -> pd.DataFrame:
     r = results[_text(results["method"]) == oc.method]
     if r.empty:
         return pd.DataFrame(columns=["genotype", "water_treatment", "n_windows_in", "n_not_steady_state",
-                                     "share_not_steady_state"])
+                                     "n_suspect_card_rbh", "share_not_steady_state", "share_suspect_card_rbh"])
     not_steady = _text(r["reason"]) == "not_steady_state" if oc.kind == "gs" else ~_bool(r["steady_state"])
+    # card_direct rows of a session whose pooled card r_bH is <= 0 are kept and counted, never hidden
+    suspect = _text(r["reason"]) == "suspect_card_rbh"
     g = pd.DataFrame({"genotype": _text(r["genotype"]), "water_treatment": _text(r["water_treatment"]),
-                      "ns": not_steady.to_numpy()}).groupby(["genotype", "water_treatment"])
-    out = pd.DataFrame({"n_windows_in": g.size(), "n_not_steady_state": g["ns"].sum().astype(int)}).reset_index()
+                      "ns": not_steady.to_numpy(), "sc": suspect.to_numpy()}).groupby(["genotype", "water_treatment"])
+    out = pd.DataFrame({"n_windows_in": g.size(), "n_not_steady_state": g["ns"].sum().astype(int),
+                        "n_suspect_card_rbh": g["sc"].sum().astype(int)}).reset_index()
     out["share_not_steady_state"] = out["n_not_steady_state"] / out["n_windows_in"]
+    out["share_suspect_card_rbh"] = out["n_suspect_card_rbh"] / out["n_windows_in"]
     return out
 
 
