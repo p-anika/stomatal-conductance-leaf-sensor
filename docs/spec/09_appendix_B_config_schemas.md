@@ -168,6 +168,7 @@ dry_run:                                # T6.1; processing/pipeline_dry_run.py o
     relaxed:      {sigma_leaf_temp_c: 0.4, sigma_air_temp_c: 0.3, sigma_rh_pct: 3.0}
   fast: {ml: {n_bootstrap: 50, forest_n_estimators: 50}}   # detection-limit settings are NOT reduced
   overrides: {uncertainty: {card_leaf_shared_draws: true}} # applied in every dry run
+  null_check: {gs_mol: 0.40, plant_sd_mol: 0.03, window_sd_mol: 0.03, n_plants: 5, n_windows: 6, alpha: 0.05}   # no-effect check, INVENTED
 card_buoyancy:                          # T5.9; threshold is convection.card_transfer_max_change
   leaf_delta_t_c: 1.0                   # leaf-like |T - T_air| that DECIDES card_transfer_unreliable (pre-registered)
   leaf_delta_t_low_c: 0.5               # also reported (= convection.min_grashof_delta_t_c floor)
@@ -235,6 +236,6 @@ Rules: k\_wm2\_per\_lux is a number above 0 and a\_s\_leaf is a number in (0, 1\
 
 **data/processed/rb\_training\_set.csv columns:** row\_id, session\_id, card\_id, shape\_group, window\_start\_iso, window\_end\_iso, n\_samples, card\_temp\_c, air\_temp\_c, surroundings\_temp\_c, lux, light\_source, rn\_wm2, c\_card, wind\_ms, convection\_regime, r\_bh\_card, r\_bh\_card\_sigma, r\_bh\_flat, f\_ratio, the geometry feature columns, photo\_gap\_sec, incidence\_angle\_deg, valid, reason.
 
-**data/processed/leaf\_gs\_results.csv columns:** session\_id, plant\_id, genotype, water\_treatment, block, position, leaf\_position, reproductive\_stage, window\_start\_iso, window\_end\_iso, n\_samples, steady\_state, method, method\_role, convection\_regime, r\_bh, r\_bh\_lo, r\_bh\_hi, leaf\_temp\_c, air\_temp\_c, rh\_pct, pressure\_hpa, lux, rn\_wm2, latent\_wm2, vpd\_pa, r\_s, g\_s\_ms, g\_s\_mol, g\_s\_mol\_lo, g\_s\_mol\_hi, resolved, censor (none, below\_detection, above\_range), g\_s\_mol\_dl, valid, reason, flags, photo\_gap\_sec, jones\_ig, cwsi, light\_source, jones\_ig\_censor (none, above\_range; blank when not computed).
+**data/processed/leaf\_gs\_results.csv columns:** session\_id, plant\_id, genotype, water\_treatment, block, position, leaf\_position, reproductive\_stage, window\_start\_iso, window\_end\_iso, n\_samples, steady\_state, method, method\_role, convection\_regime, r\_bh, r\_bh\_lo, r\_bh\_hi, leaf\_temp\_c, air\_temp\_c, rh\_pct, pressure\_hpa, lux, rn\_wm2, latent\_wm2, vpd\_pa, r\_s, g\_s\_ms, g\_s\_mol, g\_s\_mol\_lo, g\_s\_mol\_hi, resolved, censor (none, below\_detection, above\_range), g\_s\_mol\_dl, valid, reason, flags, photo\_gap\_sec, jones\_ig, cwsi, light\_source, jones\_ig\_censor (none, above\_range; blank when not computed), n\_draws\_unusable (Monte Carlo draws with no valid r\_bH, added 2026-11-11).
 
 **data/validation/ground\_truth\_gs.csv columns:** plant\_id, timestamp\_iso, instrument (porometer or gravimetric), surface (adaxial, abaxial, both\_summed or whole\_leaf), g\_s\_mol, leaf\_position, notes.
