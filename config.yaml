@@ -173,6 +173,15 @@ validation:                             # Added in T5.2/T5.6 (2026-11-10, see de
   gravimetric_match_hours: 1.0          # device windows this close to a weighing go into the trend table; placeholder (A45)
   loa_z: 1.96                           # Bland-Altman limits of agreement = bias +/- loa_z x SD (95 % if differences are normal)
   n_split_bins: 3                       # tertiles for the shape-deviation and g_s-range splits (spec T5.2)
+genotype_comparison:                    # Added in T5.3 (2026-11-10, see decision_log)
+  reference_treatment: well_watered     # "drop under drought" is measured from this level
+  ci_level: 0.95
+  n_bootstrap: 2000                     # resample plants within each genotype x treatment group
+  n_permutations: 2000                  # exact enumeration is used instead when it needs fewer arrangements
+  random_seed: 0
+  # Censored below_detection values are replaced by fraction x detection limit; above_range by uncertainty.g_s_cap_mol.
+  censor_substitution: {zero: 0.0, half_dl: 0.5, dl: 1.0}
+  primary_substitution: half_dl         # a conclusion is robust only if it holds under every substitution
 synthetic:                             # Added in T4.2 (2026-11-09). Used ONLY by ml/synthetic_data.py.
   # Every value here is invented for testing code. None is a measurement or a calibration.
   k_wm2_per_lux: 0.01                   # goes into a synthetic calibration dict, never into light_sources
